@@ -2,6 +2,7 @@ class Logger {
   static bool _enabled = true;
 
   static void enable() => _enabled = true;
+
   static void disable() => _enabled = false;
 
   static void info(String message) {
@@ -29,6 +30,13 @@ class Logger {
     if (_enabled) {
       // ignore: avoid_print
       print('✅ SUCCESS: $message');
+    }
+  }
+
+  static void debug(String message) {
+    if (_enabled) {
+      // ignore: avoid_print
+      print('🔍 DEBUG: $message');
     }
   }
 }

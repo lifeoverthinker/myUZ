@@ -1,146 +1,114 @@
 import 'dart:async';
 import 'dart:isolate';
-import 'logger.dart';
+
+import 'package:my_uz/utils/logger.dart';
+
+typedef IsolateEntryFunction<T, R> = FutureOr<R> Function(T input, SendPort sendPort);
 
 class IsolateManager<T, R> {
-  final Function(T) _function;
-  final String _name;
-  final int _maxConcurrent;
+  final String name;
 
-  List<_TaskInfo<T, R>> _tasks = [];
-  int _activeTasks = 0;
+  IsolateManager(this.name);
 
-  IsolateManager(this._function, {
-    required String name,
-    int maxConcurrent = 3,
-  }) : _name = name, _maxConcurrent = maxConcurrent;
-
-  Future<List<R>> processBatch(List<T> items) async {
-    Logger.info('IsolateManager[$_name]: Przetwarzanie partii ${items.length} elementów');
-
-    _tasks = items.map((item) => _TaskInfo<T, R>(item)).toList();
-    _activeTasks = 0;
-
-    // Uruchom tyle zadań na raz, ile pozwala maxConcurrent
-    _scheduleNext();
-
-    // Czekaj aż wszystkie zadania się zakończą
-    while (_tasks.any((task) => !task.isCompleted)) {
-      await Future.delayed(const Duration(milliseconds: 100));
+  Future<List<R>> spawn(
+      IsolateEntryFunction<T, R> entryPoint,
+      List<T> inputs) async {
+    if (inputs.isEmpty) {
+      Logger.info('IsolateManager[$name]: Przetwarzanie partii 0 elementów');
+      return [];
     }
 
-    // Zwróć wyniki
-    return _tasks.map((task) => task.result!).toList();
-  }
-
-  void _scheduleNext() {
-    if (_activeTasks >= _maxConcurrent) return;
-
-    // Znajdź kolejne niezakończone zadanie
-    final pendingTask = _tasks.firstWhere(
-          (task) => !task.isStarted && !task.isCompleted,
-      orElse: () => _TaskInfo(null as T, isCompleted: true),
-    );
-
-    // Jeśli nie ma więcej zadań, zakończ
-    if (pendingTask.isCompleted) return;
-
-    pendingTask.isStarted = true;
-    _activeTasks++;
-
-    // Uruchom zadanie w izolacji
-    _runInIsolate(pendingTask.input).then((result) {
-      pendingTask.result = result;
-      pendingTask.isCompleted = true;
-      _activeTasks--;
-
-      // Uruchom kolejne zadanie
-      _scheduleNext();
-    }).catchError((e) {
-      Logger.error('IsolateManager[$_name]: Błąd w izolacji: $e');
-      pendingTask.isCompleted = true;
-      _activeTasks--;
-
-      // Mimo błędu, uruchom kolejne zadanie
-      _scheduleNext();
-    });
-
-    // Jeśli możemy uruchomić więcej zadań równolegle, zrób to
-    if (_activeTasks < _maxConcurrent) {
-      _scheduleNext();
-    }
-  }
-
-  Future<R> _runInIsolate(T input) async {
-    final completer = Completer<R>();
-
+    Logger.info('IsolateManager[$name]: Przetwarzanie partii ${inputs.length} elementów');
+    final results = <R>[];
+    final completer = Completer<void>();
     final receivePort = ReceivePort();
     final errorPort = ReceivePort();
 
-    // Utwórz izolację
-    final isolate = await Isolate.spawn<_IsolateData<T, R>>(
-      _isolateEntryPoint,
-      _IsolateData<T, R>(
-        function: _function,
-        input: input,
-        sendPort: receivePort.sendPort,
-      ),
-      onError: errorPort.sendPort,
-    );
+    int completedCount = 0;
 
-    // Obsługa błędów
-    errorPort.listen((error) {
-      Logger.error('IsolateManager[$_name]: Błąd: $error');
-      errorPort.close();
-      receivePort.close();
-      isolate.kill(priority: Isolate.immediate);
-      completer.completeError(error ?? 'Nieznany błąd w izolacji');
-    });
-
-    // Obsługa wyniku
     receivePort.listen((message) {
-      receivePort.close();
-      errorPort.close();
-      isolate.kill(priority: Isolate.immediate);
-      completer.complete(message as R);
+      if (message is R) {
+        results.add(message);
+        completedCount++;
+
+        if (completedCount >= inputs.length) {
+          receivePort.close();
+          errorPort.close();
+          completer.complete();
+        }
+      } else if (message == 'done') {
+        completedCount++;
+
+        if (completedCount >= inputs.length) {
+          receivePort.close();
+          errorPort.close();
+          completer.complete();
+        }
+      }
     });
 
-    return completer.future;
+    errorPort.listen((message) {
+      Logger.error('IsolateManager[$name]: Błąd w izolacji: $message');
+      // Nie zamykamy portów aby pozwolić innym zadaniom dokończyć pracę
+    });
+
+    for (final input in inputs) {
+      await _spawnSingleIsolate(entryPoint, input, receivePort.sendPort, errorPort.sendPort);
+    }
+
+    await completer.future;
+    return results;
   }
 
-  static void _isolateEntryPoint<T, R>(_IsolateData<T, R> data) {
+  Future<void> _spawnSingleIsolate(
+    IsolateEntryFunction<T, R> entryPoint,
+    T input,
+    SendPort sendPort,
+    SendPort errorPort
+  ) async {
     try {
-      // Wywołaj funkcję z danymi wejściowymi
-      final result = data.function(data.input);
+      // Przygotuj dane dla izolacji - tylko to co jest serializowalne
+      final _IsolateData<T, R> isolateData = _IsolateData<T, R>(
+        input: input,
+        sendPort: sendPort,
+        errorPort: errorPort,
+        entryFunction: entryPoint,
+      );
 
-      // Wyślij wynik z powrotem
-      data.sendPort.send(result);
-    } catch (e) {
-      // Błędy zostaną obsłużone przez errorPort
-      rethrow;
+      await Isolate.spawn(_isolateEntryPoint, isolateData);
+    } catch (e, stack) {
+      Logger.error('IsolateManager[$name]: Błąd tworzenia izolacji: $e\n$stack');
+      // Powiadom główny wątek o błędzie
+      sendPort.send('error');
+    }
+  }
+
+  static void _isolateEntryPoint<T, R>(_IsolateData<T, R> data) async {
+    try {
+      final result = await data.entryFunction(data.input, data.sendPort);
+      if (result != null) {
+        data.sendPort.send(result);
+      } else {
+        data.sendPort.send('done');
+      }
+    } catch (e, stack) {
+      data.errorPort.send('$e\n$stack');
+      // Powiadom główny wątek o zakończeniu (nawet z błędem)
+      data.sendPort.send('done');
     }
   }
 }
 
-// Klasa pomocnicza do przechowywania informacji o zadaniu
-class _TaskInfo<T, R> {
-  final T input;
-  bool isStarted = false;
-  bool isCompleted = false;
-  R? result;
-
-  _TaskInfo(this.input, {this.isCompleted = false});
-}
-
-// Klasa pomocnicza do przesyłania danych do izolacji
 class _IsolateData<T, R> {
-  final Function(T) function;
   final T input;
   final SendPort sendPort;
+  final SendPort errorPort;
+  final IsolateEntryFunction<T, R> entryFunction;
 
   _IsolateData({
-    required this.function,
     required this.input,
     required this.sendPort,
+    required this.errorPort,
+    required this.entryFunction,
   });
 }
