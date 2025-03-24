@@ -1,28 +1,19 @@
 name: Run Scraper
-
 on:
   schedule:
-    - cron: '0 4 * * *'  # Codziennie o 4:00 rano UTC
-  workflow_dispatch:     # Pozwala na ręczne uruchomienie
+    - cron: '0 4 * * *'  # Codziennie o 4:00 UTC
+  workflow_dispatch:
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - uses: actions/checkout@v2
+      - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.29.2'
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Run scraper
-        run: dart --enable-asserts -e "import 'package:my_uz/scraper/services/scraper_orchestrator.dart'; import 'package:my_uz/config/app_config.dart'; void main() async { AppConfig.enableScraper = true; final orchestrator = ScraperOrchestrator(); try { await orchestrator.runScraper(); } finally { orchestrator.dispose(); }}"
+      - run: flutter pub get
+      - run: dart run bin/scraper.dart
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
