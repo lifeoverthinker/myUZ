@@ -1,15 +1,12 @@
 name: Run Scraper
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+  schedule:
+    - cron: '0 4 * * *'  # Codziennie o 4:00 rano UTC
+  workflow_dispatch:     # Pozwala na ręczne uruchomienie
 
 jobs:
-  build:
+  scrape:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,11 +18,11 @@ jobs:
         with:
           flutter-version: '3.29.2'
 
-      - name: Verify Dart SDK version
-        run: dart --version
-
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Run tests
-        run: flutter test
+      - name: Run scraper
+        run: dart lib/scraper/main.dart  # Ścieżka do Twojego skryptu scrapera
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
