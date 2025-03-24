@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 class Logger {
   static bool _enabled = true;
 
@@ -8,25 +6,29 @@ class Logger {
 
   static void info(String message) {
     if (_enabled) {
-      debugPrint('ℹ️ INFO: $message');
+      // ignore: avoid_print
+      print('ℹ️ INFO: $message');
     }
   }
 
   static void error(String message) {
     if (_enabled) {
-      debugPrint('❌ ERROR: $message');
+      // ignore: avoid_print
+      print('❌ ERROR: $message');
     }
   }
 
   static void warning(String message) {
     if (_enabled) {
-      debugPrint('⚠️ WARNING: $message');
+      // ignore: avoid_print
+      print('⚠️ WARNING: $message');
     }
   }
 
   static void success(String message) {
     if (_enabled) {
-      debugPrint('✅ SUCCESS: $message');
+      // ignore: avoid_print
+      print('✅ SUCCESS: $message');
     }
   }
 }
