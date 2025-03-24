@@ -1,19 +1,19 @@
 import 'package:html/parser.dart' as parser;
 import 'package:my_uz/models/kierunek.dart';
 import 'package:my_uz/utils/logger.dart';
-import 'package:my_uz/services/db/supabase_service.dart';
 import './scraper_base.dart';
 
 class KierunkiScraper extends ScraperBase {
   Future<List<Kierunek>> scrapeKierunki() async {
-    final url = '${baseUrl}grupy_lista.php';
+    final url = '${baseUrl}grupy_lista_kierunkow.php'; // Poprawiony URL
     final html = await fetchPage(url);
     final document = parser.parse(html);
     final List<Kierunek> kierunki = [];
 
     try {
       // Szukamy wszystkich linków do kierunków
-      final kierunkiLinks = document.querySelectorAll('a[href^="grupy_lista_grup_kierunkow.php"]');
+      final kierunkiLinks = document
+          .querySelectorAll('a[href^="grupy_lista_grup_kierunkow.php"]');
 
       for (var link in kierunkiLinks) {
         final nazwa = link.text.trim();
@@ -28,9 +28,6 @@ class KierunkiScraper extends ScraperBase {
           );
 
           kierunki.add(kierunek);
-
-          // Zapisz kierunek do bazy danych
-          await SupabaseService.createOrUpdateKierunek(kierunek);
         }
       }
 
