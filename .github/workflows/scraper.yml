@@ -22,7 +22,7 @@ jobs:
         run: flutter pub get
 
       - name: Run scraper
-        run: dart lib/scraper/main.dart  # Ścieżka do Twojego skryptu scrapera
+        run: dart --enable-asserts -e "import 'package:my_uz/scraper/services/scraper_orchestrator.dart'; import 'package:my_uz/config/app_config.dart'; void main() async { AppConfig.enableScraper = true; final orchestrator = ScraperOrchestrator(); try { await orchestrator.runScraper(); } finally { orchestrator.dispose(); }}"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
