@@ -1,0 +1,27 @@
+name: my_uz
+description: Aplikacja do zarządzania planem zajęć UZ
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase:
+  beautiful_soup_dart:
+  http:
+  html:
+  icalendar_parser:
+  intl:
+  crypto:
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints:
+
+flutter:
+  uses-material-design: true
+
