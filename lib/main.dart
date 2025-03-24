@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:my_uz/config/app_config.dart';
-import 'screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,36 +21,24 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const SyncPage(),
+      home: const CounterPage(),
     );
   }
 }
 
-class SyncPage extends StatefulWidget {
-  const SyncPage({super.key});
+class CounterPage extends StatefulWidget {
+  const CounterPage({super.key});
 
   @override
-  State<SyncPage> createState() => _SyncPageState();
+  State<CounterPage> createState() => _CounterPageState();
 }
 
-class _SyncPageState extends State<SyncPage> {
-  final String _statusMessage = "Przechodzenie do aplikacji...";
+class _CounterPageState extends State<CounterPage> {
+  int _counter = 0;
 
-  @override
-  void initState() {
-    super.initState();
-
-    // Przygotuj BuildContext przed asynchronicznym kodem
-    _navigateToHomeAfterDelay();
-  }
-
-  void _navigateToHomeAfterDelay() {
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => HomeScreen()),
-        );
-      }
+  void _incrementCounter() {
+    setState(() {
+      _counter++;
     });
   }
 
@@ -62,42 +49,23 @@ class _SyncPageState extends State<SyncPage> {
         title: const Text('Plan UZ'),
       ),
       body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 20),
-              Text(
-                _statusMessage,
-                textAlign: TextAlign.center,
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 32),
-              ElevatedButton(
-                onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Informacja'),
-                      content: const Text(
-                          'Synchronizacja danych odbywa się automatycznie w chmurze (GitHub Actions). Aplikacja mobilna ma dostęp tylko do odczytu danych.'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('OK'),
-                        )
-                      ],
-                    ),
-                  );
-                },
-                child: const Text('Informacje o synchronizacji'),
-              )
-            ],
-          ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            const Text(
+              'You have pushed the button this many times:',
+            ),
+            Text(
+              '$_counter',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+          ],
         ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _incrementCounter,
+        tooltip: 'Increment',
+        child: const Icon(Icons.add),
       ),
     );
   }
