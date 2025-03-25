@@ -11,7 +11,7 @@ import 'package:my_uz/models/kierunek.dart';
 import 'package:my_uz/models/grupa.dart';
 import 'package:my_uz/utils/logger.dart';
 
-const baseUrl = 'https://e-uczelnia.uz.zgora.pl';
+const baseUrl = 'https://plan.uz.zgora.pl/grupy_lista_kierunkow.php';
 
 Future<void> main() async {
   // Inicjalizacja serwisu
