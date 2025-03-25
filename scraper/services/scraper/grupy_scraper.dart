@@ -6,6 +6,10 @@ import 'package:my_uz/services/db/supabase_service.dart';
 import './scraper_base.dart';
 
 class GrupyScraper extends ScraperBase {
+  final SupabaseService supabaseService;
+
+  GrupyScraper(this.supabaseService);
+
   Future<List<Grupa>> scrapeGrupy(Kierunek kierunek) async {
     final html = await fetchPage(kierunek.url);
     final document = parser.parse(html);
@@ -37,7 +41,7 @@ class GrupyScraper extends ScraperBase {
               grupy.add(grupa);
 
               // Zapisz grupę do bazy danych
-              await SupabaseService.createOrUpdateGrupa(grupa);
+              await supabaseService.createOrUpdateGrupa(grupa);
             }
           }
         }

@@ -1,51 +1,53 @@
 class Nauczyciel {
   final int? id;
-  final String pelneImieNazwisko;
-  final String email;
-  final int wydzialId;
+  final String? urlId;
   final String urlPlan;
+  final String? nazwa;
+  final String? email;
   final DateTime? ostatniaAktualizacja;
 
   Nauczyciel({
     this.id,
-    required this.pelneImieNazwisko,
-    required this.email,
-    required this.wydzialId,
+    this.urlId,
     required this.urlPlan,
+    this.nazwa,
+    this.email,
     this.ostatniaAktualizacja,
   });
 
-  Map<String, dynamic> toJson() {
-    final Map<String, dynamic> json = {
-      'pelne_imie_nazwisko': pelneImieNazwisko,
-      'email': email,
-      'wydzial_id': wydzialId,
-      'url_plan': urlPlan,
-    };
-
-    // Dodaj id tylko jeśli nie jest null (przy aktualizacji)
-    if (id != null) {
-      json['id'] = id;
-    }
-
-    // Dodaj datę aktualizacji jeśli jest
-    if (ostatniaAktualizacja != null) {
-      json['ostatnia_aktualizacja'] = ostatniaAktualizacja!.toIso8601String();
-    }
-
-    return json;
-  }
-
-  factory Nauczyciel.fromJson(Map<String, dynamic> json) {
+  Nauczyciel copyWith({
+    int? id,
+    String? urlId,
+    String? urlPlan,
+    String? nazwa,
+    String? email,
+    DateTime? ostatniaAktualizacja,
+  }) {
     return Nauczyciel(
-      id: json['id'],
-      pelneImieNazwisko: json['pelne_imie_nazwisko'],
-      email: json['email'],
-      wydzialId: json['wydzial_id'],
-      urlPlan: json['url_plan'],
-      ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
-          ? DateTime.parse(json['ostatnia_aktualizacja'])
-          : null,
+      id: id ?? this.id,
+      urlId: urlId ?? this.urlId,
+      urlPlan: urlPlan ?? this.urlPlan,
+      nazwa: nazwa ?? this.nazwa,
+      email: email ?? this.email,
+      ostatniaAktualizacja: ostatniaAktualizacja ?? this.ostatniaAktualizacja,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'url_id': urlId,
+        'url_plan': urlPlan,
+        'nazwa': nazwa,
+        'email': email,
+      };
+
+  factory Nauczyciel.fromJson(Map<String, dynamic> json) => Nauczyciel(
+        id: json['id'],
+        urlId: json['url_id'],
+        urlPlan: json['url_plan'],
+        nazwa: json['nazwa'],
+        email: json['email'],
+        ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
+            ? DateTime.parse(json['ostatnia_aktualizacja'])
+            : null,
+      );
 }

@@ -9,6 +9,10 @@ import 'package:crypto/crypto.dart';
 import 'scraper_base.dart';
 
 class ZajeciaScraper extends ScraperBase {
+  final SupabaseService supabaseService;
+
+  ZajeciaScraper(this.supabaseService);
+
   Future<List<Zajecia>> scrapeZajecia(Grupa grupa) async {
     final idMatch = RegExp(r'ID=(\d+)').firstMatch(grupa.urlIcs);
 
@@ -32,7 +36,8 @@ class ZajeciaScraper extends ScraperBase {
 
         for (var row in rows) {
           final cells = row.querySelectorAll('td');
-          if (cells.length >= 8) { // PG, Od, Do, Przedmiot, RZ, Nauczyciel, Miejsce, Terminy
+          if (cells.length >= 8) {
+            // PG, Od, Do, Przedmiot, RZ, Nauczyciel, Miejsce, Terminy
             // Pomijamy komórkę PG (index 0)
             final odText = cells[1].text.trim();
             final doText = cells[2].text.trim();
@@ -49,34 +54,41 @@ class ZajeciaScraper extends ScraperBase {
               final href = nauczycielLink.attributes['href'];
               if (href != null) {
                 final urlPlan = normalizeUrl(href);
-                final nauczyciel = await SupabaseService.getNauczycielByUrlPlan(urlPlan);
+                final nauczyciel =
+                    await supabaseService.getNauczycielByUrlPlan(urlPlan);
                 nauczycielId = nauczyciel?.id;
               }
             }
 
             final miejsceLink = cells[6].querySelector('a');
-            final miejsce = miejsceLink != null ? miejsceLink.text.trim() : cells[6].text.trim();
+            final miejsce = miejsceLink != null
+                ? miejsceLink.text.trim()
+                : cells[6].text.trim();
             final miejsceText = miejsce.isEmpty ? "Brak sali" : miejsce;
 
             final terminyLink = cells[7].querySelector('a');
-            final terminy = terminyLink != null ? terminyLink.text.trim() : cells[7].text.trim();
+            final terminy = terminyLink != null
+                ? terminyLink.text.trim()
+                : cells[7].text.trim();
 
             // Parsowanie czasów
             final od = _parseTimeString(odText);
             final do_ = _parseTimeString(doText);
 
-            if (od != null && do_ != null && grupa.id != null) {
-              final uniqueContent = '${grupa.id}-$odText-$doText-$przedmiot-$miejsce';
+            if (grupa.id != null) {
+              final uniqueContent =
+                  '${grupa.id}-$odText-$doText-$przedmiot-$miejsce';
               final uid = _generateUid(uniqueContent);
 
               final zajecie = Zajecia(
                 uid: uid,
                 grupaId: grupa.id!,
-                od: odText,
-                do_: doText,
+                od: od,
+                // Używamy przekonwertowanej daty
+                do_: do_,
+                // Używamy przekonwertowanej daty
                 przedmiot: przedmiot,
                 rz: rz,
-                nauczyciel: nauczycielCell.text.trim(),
                 miejsce: miejsceText,
                 terminy: terminy,
                 nauczycielId: nauczycielId,
@@ -90,10 +102,11 @@ class ZajeciaScraper extends ScraperBase {
         // Zapisz zajęcia do bazy danych
         if (zajecia.isNotEmpty && grupa.id != null) {
           // Najpierw usuń stare zajęcia
-          await SupabaseService.deleteZajeciaForGrupa(grupa.id!);
+          await supabaseService.deleteZajeciaForGrupa(grupa.id!);
           // Następnie dodaj nowe
-          await SupabaseService.batchInsertZajecia(zajecia);
-          Logger.info('Zapisano ${zajecia.length} zajęć dla grupy ${grupa.nazwa}');
+          await supabaseService.batchInsertZajecia(zajecia);
+          Logger.info(
+              'Zapisano ${zajecia.length} zajęć dla grupy ${grupa.nazwa}');
         }
       }
 
@@ -105,7 +118,7 @@ class ZajeciaScraper extends ScraperBase {
   }
 
   // Parsowanie czasu w formacie "HH:MM"
-  DateTime? _parseTimeString(String timeStr) {
+  DateTime _parseTimeString(String timeStr) {
     try {
       final parts = timeStr.split(':');
       if (parts.length == 2) {
@@ -119,7 +132,10 @@ class ZajeciaScraper extends ScraperBase {
     } catch (e) {
       Logger.error('Błąd parsowania czasu: $timeStr - $e');
     }
-    return null;
+
+    // Domyślna data w przypadku błędu
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
   }
 
   // Generowanie unikalnego ID

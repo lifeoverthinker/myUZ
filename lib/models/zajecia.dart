@@ -1,60 +1,52 @@
 class Zajecia {
   final String uid;
-  final int grupaId;
-  final String od;
-  final String do_;
+  final int? grupaId;
+  final int? nauczycielId;
+  final DateTime od;
+  final DateTime do_;
   final String przedmiot;
   final String? rz;
-  final String nauczyciel;
-  final String miejsce;
+  final String? miejsce;
   final String? terminy;
   final DateTime? ostatniaAktualizacja;
-  final int? nauczycielId;
 
   Zajecia({
     required this.uid,
-    required this.grupaId,
+    this.grupaId,
+    this.nauczycielId,
     required this.od,
     required this.do_,
     required this.przedmiot,
     this.rz,
-    required this.nauczyciel,
-    required this.miejsce,
+    this.miejsce,
     this.terminy,
-    this.nauczycielId,
     this.ostatniaAktualizacja,
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      'uid': uid,
-      'grupa_id': grupaId,
-      'od': od,
-      'do': do_,
-      'przedmiot': przedmiot,
-      'rz': rz,
-      'miejsce': miejsce,
-      'terminy': terminy,
-      'nauczyciel_id': nauczycielId,
-      'ostatnia_aktualizacja': ostatniaAktualizacja?.toIso8601String(),
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'uid': uid,
+        'grupa_id': grupaId,
+        'nauczyciel_id': nauczycielId,
+        'od': od.toIso8601String(),
+        'do': do_.toIso8601String(),
+        'przedmiot': przedmiot,
+        'rz': rz,
+        'miejsce': miejsce,
+        'terminy': terminy,
+      };
 
-  factory Zajecia.fromJson(Map<String, dynamic> json) {
-    return Zajecia(
-      uid: json['uid'],
-      grupaId: json['grupa_id'],
-      od: json['od'],
-      do_: json['do'],
-      przedmiot: json['przedmiot'],
-      rz: json['rz'],
-      nauczyciel: json['nauczyciel'] ?? '',
-      miejsce: json['miejsce'] ?? 'Brak sali',
-      terminy: json['terminy'],
-      nauczycielId: json['nauczyciel_id'],
-      ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
-          ? DateTime.parse(json['ostatnia_aktualizacja'])
-          : null,
-    );
-  }
+  factory Zajecia.fromJson(Map<String, dynamic> json) => Zajecia(
+        uid: json['uid'],
+        grupaId: json['grupa_id'],
+        nauczycielId: json['nauczyciel_id'],
+        od: DateTime.parse(json['od']),
+        do_: DateTime.parse(json['do']),
+        przedmiot: json['przedmiot'],
+        rz: json['rz'],
+        miejsce: json['miejsce'],
+        terminy: json['terminy'],
+        ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
+            ? DateTime.parse(json['ostatnia_aktualizacja'])
+            : null,
+      );
 }
