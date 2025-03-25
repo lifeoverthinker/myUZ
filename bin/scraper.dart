@@ -16,23 +16,95 @@ import 'package:my_uz/utils/logger.dart';
 const baseUrl = 'https://plan.uz.zgora.pl/grupy_lista_kierunkow.php';
 
 Future<void> main() async {
+  final startTime = DateTime.now();
+  Logger.info(
+      '=== Rozpoczęcie procesu scrapowania: ${startTime.toString()} ===');
+
   // Inicjalizacja serwisu
   final supabaseService = SupabaseService();
 
-  // Pobierz kierunki
-  final kierunki = await scrapeKierunki(supabaseService);
+  try {
+    // Test połączenia z bazą
+    Logger.info('Sprawdzanie połączenia z bazą danych...');
+    bool connectionOk = await testConnection(supabaseService);
+    if (!connectionOk) {
+      Logger.error('Nie można połączyć się z bazą danych. Przerwanie procesu.');
+      return;
+    }
 
-  // Pobierz grupy dla każdego kierunku
-  for (final kierunek in kierunki) {
-    await scrapeGrupy(kierunek, supabaseService);
+    // Pobierz kierunki
+    Logger.info('=== ETAP 1/4: Pobieranie kierunków ===');
+    final kierunki = await scrapeKierunki(supabaseService);
+    Logger.info('Pobrano ${kierunki.length} kierunków');
+
+    if (kierunki.isEmpty) {
+      Logger.error(
+          'Nie znaleziono żadnych kierunków. Sprawdź adres URL lub strukturę strony.');
+      return;
+    }
+
+    // Pobierz grupy dla każdego kierunku
+    Logger.info('=== ETAP 2/4: Pobieranie grup ===');
+    int grupyCount = 0;
+    for (final kierunek in kierunki) {
+      Logger.info('Pobieranie grup dla kierunku: ${kierunek.nazwa}');
+      await scrapeGrupy(kierunek, supabaseService);
+
+      // Sprawdzanie ilości pobranych grup po każdym kierunku
+      final grupy = await supabaseService.getGrupyByKierunekId(kierunek.id!);
+      grupyCount += grupy.length;
+      Logger.info(
+          'Pobrano ${grupy.length} grup dla kierunku ${kierunek.nazwa}');
+    }
+    Logger.info('Łącznie pobrano $grupyCount grup');
+
+    // Pobierz zajęcia dla każdej grupy
+    Logger.info('=== ETAP 3/4: Pobieranie zajęć dla grup ===');
+    await scrapeZajeciaForGrupy(supabaseService);
+
+    // Sprawdzanie ilości zajęć w bazie
+    final zajeciaCount = await supabaseService.getZajeciaCount();
+    Logger.info('Łącznie zapisano $zajeciaCount zajęć dla grup');
+
+    // Pobierz plany nauczycieli
+    Logger.info('=== ETAP 4/4: Pobieranie planów nauczycieli ===');
+    final nauczyciele = await supabaseService.getAllNauczyciele();
+    if (nauczyciele.isEmpty) {
+      Logger.warning('Nie znaleziono nauczycieli w bazie danych!');
+    } else {
+      Logger.info(
+          'Znaleziono ${nauczyciele.length} nauczycieli. Rozpoczynam pobieranie planów...');
+      await scrapePlanyNauczycieli(nauczyciele, supabaseService);
+
+      // Sprawdzanie ilości zajęć nauczycieli w bazie
+      final planNauczycieliCount =
+          await supabaseService.getPlanyNauczycieliCount();
+      Logger.info('Łącznie zapisano $planNauczycieliCount zajęć nauczycieli');
+    }
+
+    final endTime = DateTime.now();
+    final duration = endTime.difference(startTime);
+    Logger.info(
+        '=== Zakończenie procesu scrapowania: ${endTime.toString()} ===');
+    Logger.info(
+        'Całkowity czas wykonania: ${duration.inMinutes} min ${duration.inSeconds % 60} s');
+  } catch (e, stack) {
+    Logger.error('Wystąpił krytyczny błąd podczas procesu scrapowania: $e');
+    Logger.error('Stack trace: $stack');
   }
+}
 
-  // Pobierz zajęcia dla każdej grupy
-  await scrapeZajeciaForGrupy(supabaseService);
-
-  // Pobierz plany nauczycieli
-  final nauczyciele = await supabaseService.getAllNauczyciele();
-  await scrapePlanyNauczycieli(nauczyciele, supabaseService);
+Future<bool> testConnection(SupabaseService supabaseService) async {
+  try {
+    // Próba wykonania prostego zapytania do bazy
+    final kierunki = await supabaseService.getAllKierunki();
+    Logger.info(
+        'Połączenie z bazą działa poprawnie. Znaleziono ${kierunki.length} kierunków w bazie.');
+    return true;
+  } catch (e) {
+    Logger.error('Błąd połączenia z bazą danych: $e');
+    return false;
+  }
 }
 
 Future<List<Kierunek>> scrapeKierunki(SupabaseService supabaseService) async {
@@ -280,22 +352,26 @@ Future<void> scrapePlanNauczyciela(
   try {
     final response = await http.get(Uri.parse(nauczyciel.urlPlan));
     if (response.statusCode == 200) {
-      Logger.info('Pobrano plan nauczyciela: ${nauczyciel.nazwa ?? nauczyciel.id}');
+      Logger.info(
+          'Pobrano plan nauczyciela: ${nauczyciel.nazwa ?? nauczyciel.id}');
 
       // Najpierw usuń stare zajęcia
       await supabaseService.deleteZajeciaForNauczyciel(nauczyciel.id!);
 
       // Parsuj stronę HTML
       final document = parser.parse(response.body);
-      final rows = document.querySelectorAll('#table_groups tr:not(.gray):not(:first-child)');
+      final rows = document
+          .querySelectorAll('#table_groups tr:not(.gray):not(:first-child)');
       final List<PlanNauczyciela> planyList = [];
 
       // Znajdź adres ICS dla Microsoft/Zimbra
-      final icsLink = document.querySelector('a[href*="nauczyciel_ics.php"][id="idMS"]');
+      final icsLink =
+          document.querySelector('a[href*="nauczyciel_ics.php"][id="idMS"]');
       final urlIcs = icsLink?.attributes['href'];
 
       if (urlIcs != null) {
-        Logger.info('Znaleziono link ICS: $urlIcs dla nauczyciela ${nauczyciel.nazwa ?? nauczyciel.id}');
+        Logger.info(
+            'Znaleziono link ICS: $urlIcs dla nauczyciela ${nauczyciel.nazwa ?? nauczyciel.id}');
       }
 
       for (final row in rows) {
@@ -377,7 +453,8 @@ Future<void> scrapePlanNauczyciela(
               );
 
               // Generuj UID
-              final contentToHash = '${nauczyciel.id}-$przedmiot-$od-$do_-$miejsce';
+              final contentToHash =
+                  '${nauczyciel.id}-$przedmiot-$od-$do_-$miejsce';
               final uid = _generateUid(contentToHash);
 
               final plan = PlanNauczyciela(
@@ -394,15 +471,18 @@ Future<void> scrapePlanNauczyciela(
               planyList.add(plan);
 
               // Zapisujemy linki do grup znalezionych w planie
-              final grupaLinks = cells[4].querySelectorAll('a[href*="grupy_plan.php?ID="]');
+              final grupaLinks =
+                  cells[4].querySelectorAll('a[href*="grupy_plan.php?ID="]');
               for (final grupaLink in grupaLinks) {
                 final grupaUrl = grupaLink.attributes['href'];
                 final grupaNazwa = grupaLink.text.trim();
-                final grupaIdMatch = RegExp(r'ID=(\d+)').firstMatch(grupaUrl ?? '');
+                final grupaIdMatch =
+                    RegExp(r'ID=(\d+)').firstMatch(grupaUrl ?? '');
 
                 if (grupaIdMatch != null) {
                   final grupaUrlId = grupaIdMatch.group(1)!;
-                  Logger.info('Znaleziono grupę: $grupaNazwa, ID: $grupaUrlId dla nauczyciela ${nauczyciel.nazwa}');
+                  Logger.info(
+                      'Znaleziono grupę: $grupaNazwa, ID: $grupaUrlId dla nauczyciela ${nauczyciel.nazwa}');
                 }
               }
             }
@@ -414,7 +494,8 @@ Future<void> scrapePlanNauczyciela(
 
       // Zapisz plany do bazy danych
       if (planyList.isNotEmpty) {
-        Logger.info('Znaleziono ${planyList.length} zajęć dla nauczyciela ${nauczyciel.nazwa}');
+        Logger.info(
+            'Znaleziono ${planyList.length} zajęć dla nauczyciela ${nauczyciel.nazwa}');
         await supabaseService.batchInsertPlanyNauczycieli(planyList);
       } else {
         Logger.info('Nie znaleziono zajęć dla nauczyciela ${nauczyciel.nazwa}');
@@ -423,6 +504,7 @@ Future<void> scrapePlanNauczyciela(
       Logger.error('Błąd pobierania planu nauczyciela: ${response.statusCode}');
     }
   } catch (e) {
-    Logger.error('Błąd podczas scrapowania planu nauczyciela ${nauczyciel.nazwa}: $e');
+    Logger.error(
+        'Błąd podczas scrapowania planu nauczyciela ${nauczyciel.nazwa}: $e');
   }
 }

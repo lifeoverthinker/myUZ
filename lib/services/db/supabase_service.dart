@@ -174,6 +174,22 @@ class SupabaseService {
     Logger.info('Usunięto stare zajęcia grupy: $grupaId');
   }
 
+  Future<int> getZajeciaCount() async {
+    final response = await _client
+        .from('zajecia')
+        .select('count')
+        .single();
+    return response['count'] ?? 0;
+  }
+
+  Future<int> getPlanyNauczycieliCount() async {
+    final response = await _client
+        .from('plany_nauczycieli')
+        .select('count')
+        .single();
+    return response['count'] ?? 0;
+  }
+
   Future<void> batchInsertZajecia(List<Zajecia> zajecia) async {
     const batchSize = 100; // Optymalna wielkość partii
     for (var i = 0; i < zajecia.length; i += batchSize) {
