@@ -1,14 +1,16 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as parser;
-import 'package:crypto/crypto.dart';
-import 'dart:convert';
-import 'dart:async';
-import 'package:my_uz/services/db/supabase_service.dart';
+
+import 'package:my_uz/models/grupa.dart';
+import 'package:my_uz/models/kierunek.dart';
 import 'package:my_uz/models/nauczyciel.dart';
 import 'package:my_uz/models/plan_nauczyciela.dart';
 import 'package:my_uz/models/zajecia.dart';
-import 'package:my_uz/models/kierunek.dart';
-import 'package:my_uz/models/grupa.dart';
+import 'package:my_uz/services/db/supabase_service.dart';
 import 'package:my_uz/utils/logger.dart';
 
 const baseUrl = 'https://plan.uz.zgora.pl/grupy_lista_kierunkow.php';
@@ -75,24 +77,37 @@ Future<void> scrapeGrupy(
   try {
     final response = await http.get(Uri.parse(kierunek.url));
     if (response.statusCode == 200) {
+      Logger.info('Pobrano stronę grup dla kierunku: ${kierunek.nazwa}');
       var document = parser.parse(response.body);
-      var links = document.querySelectorAll('a.list-group-item');
+
+      // Znajdujemy linki w tabeli TR TD a
+      var links = document.querySelectorAll('table.table-bordered tr td a');
 
       for (var link in links) {
         final url = link.attributes['href'];
         final nazwa = link.text.trim();
 
-        if (url != null && url.contains('grupa=')) {
-          final urlIcs = '$baseUrl/timetable2/$url&format=ical';
-          final grupa = Grupa(
-            nazwa: nazwa,
-            kierunekId: kierunek.id,
-            urlIcs: urlIcs,
-          );
+        if (url != null && url.contains('grupy_plan.php?ID=')) {
+          final idMatch = RegExp(r'ID=(\d+)').firstMatch(url);
+          if (idMatch != null) {
+            final id = idMatch.group(1)!;
 
-          await supabaseService.createOrUpdateGrupa(grupa);
+            // Tworzymy poprawny URL do pliku ICS
+            final urlIcs = '$baseUrl/grupy_ics.php?ID=$id&KIND=MS';
+
+            final grupa = Grupa(
+              nazwa: nazwa,
+              kierunekId: kierunek.id,
+              urlIcs: urlIcs,
+            );
+
+            Logger.info('Znaleziono grupę: $nazwa, URL ICS: $urlIcs');
+            await supabaseService.createOrUpdateGrupa(grupa);
+          }
         }
       }
+    } else {
+      Logger.error('Nie można pobrać strony grup: ${response.statusCode}');
     }
   } catch (e) {
     Logger.error('Błąd podczas pobierania grup: $e');
@@ -242,8 +257,8 @@ String _generateUid(String content) {
   return digest.toString();
 }
 
-// Dodana brakująca funkcja
-Future<void> scrapePlanyNauczycieli(List<Nauczyciel> nauczyciele, SupabaseService supabaseService) async {
+Future<void> scrapePlanyNauczycieli(
+    List<Nauczyciel> nauczyciele, SupabaseService supabaseService) async {
   Logger.info('Rozpoczęto aktualizację planów nauczycieli');
   int count = 0;
 
@@ -252,86 +267,162 @@ Future<void> scrapePlanyNauczycieli(List<Nauczyciel> nauczyciele, SupabaseServic
     count++;
 
     if (count % 10 == 0) {
-      Logger.info('Zaktualizowano plany $count/${nauczyciele.length} nauczycieli');
+      Logger.info(
+          'Zaktualizowano plany $count/${nauczyciele.length} nauczycieli');
     }
   }
 
   Logger.info('Zakończono aktualizację planów nauczycieli');
 }
 
-Future<void> scrapePlanNauczyciela(Nauczyciel nauczyciel, SupabaseService supabaseService) async {
+Future<void> scrapePlanNauczyciela(
+    Nauczyciel nauczyciel, SupabaseService supabaseService) async {
   try {
     final response = await http.get(Uri.parse(nauczyciel.urlPlan));
     if (response.statusCode == 200) {
+      Logger.info('Pobrano plan nauczyciela: ${nauczyciel.nazwa ?? nauczyciel.id}');
+
       // Najpierw usuń stare zajęcia
       await supabaseService.deleteZajeciaForNauczyciel(nauczyciel.id!);
 
-      // Przetwarzanie HTML planu nauczyciela
-      final htmlContent = response.body;
+      // Parsuj stronę HTML
+      final document = parser.parse(response.body);
+      final rows = document.querySelectorAll('#table_groups tr:not(.gray):not(:first-child)');
       final List<PlanNauczyciela> planyList = [];
 
-      // Podobny schemat parsowania jak dla zajęć grup
-      final regex = RegExp(r'<div class="event">(.*?)</div>', dotAll: true);
-      final matches = regex.allMatches(htmlContent);
+      // Znajdź adres ICS dla Microsoft/Zimbra
+      final icsLink = document.querySelector('a[href*="nauczyciel_ics.php"][id="idMS"]');
+      final urlIcs = icsLink?.attributes['href'];
 
-      for (final match in matches) {
-        final eventContent = match.group(1)!;
+      if (urlIcs != null) {
+        Logger.info('Znaleziono link ICS: $urlIcs dla nauczyciela ${nauczyciel.nazwa ?? nauczyciel.id}');
+      }
 
-        // Parsowanie daty i godzin
-        final dataGodzinyMatch =
-            RegExp(r'<div class="date">(.*?)</div>', dotAll: true)
-                .firstMatch(eventContent);
-        final przedmiotMatch =
-            RegExp(r'<div class="title">(.*?)</div>', dotAll: true)
-                .firstMatch(eventContent);
-        final miejsceMatch =
-            RegExp(r'<div class="location">(.*?)</div>', dotAll: true)
-                .firstMatch(eventContent);
+      for (final row in rows) {
+        final cells = row.querySelectorAll('td');
+        if (cells.length >= 7) {
+          try {
+            final odText = cells[0].text.trim();
+            final doText = cells[1].text.trim();
+            final przedmiot = cells[2].text.trim();
+            final rzText = cells[3].querySelector('.rz')?.text.trim() ?? '';
+            final miejsce = cells[5].text.trim().replaceAll('\n', ' ');
+            final terminy = cells[6].text.trim();
 
-        if (dataGodzinyMatch != null && przedmiotMatch != null) {
-          // Przetwarzanie daty i godziny
-          final dataGodziny = dataGodzinyMatch.group(1)!;
-          // Przykładowy format: "2023-10-15 10:00-11:45"
-          final parts = dataGodziny.split(' ');
-          final data = parts[0];
-          final godziny = parts[1].split('-');
+            // Parsowanie dnia tygodnia z nagłówka
+            String? dzienTygodnia;
+            var headerRow = row.previousElementSibling;
+            while (headerRow != null) {
+              if (headerRow.classes.contains('gray') &&
+                  headerRow.id.startsWith('label_day')) {
+                dzienTygodnia = headerRow.text.trim();
+                break;
+              }
+              headerRow = headerRow.previousElementSibling;
+            }
 
-          final dataOd = DateTime.parse('${data}T${godziny[0]}:00');
-          final dataDo = DateTime.parse('${data}T${godziny[1]}:00');
+            // Przekształcenie godzin na DateTime
+            final currentDate = DateTime.now();
+            int dayOffset = 0;
 
-          final przedmiot = przedmiotMatch.group(1)!;
-          final miejsce = miejsceMatch?.group(1);
+            // Ustalenie dnia tygodnia
+            if (dzienTygodnia?.contains('Poniedziałek') == true) {
+              dayOffset = 1 - currentDate.weekday;
+            } else if (dzienTygodnia?.contains('Wtorek') == true) {
+              dayOffset = 2 - currentDate.weekday;
+            } else if (dzienTygodnia?.contains('Środa') == true) {
+              dayOffset = 3 - currentDate.weekday;
+            } else if (dzienTygodnia?.contains('Czwartek') == true) {
+              dayOffset = 4 - currentDate.weekday;
+            } else if (dzienTygodnia?.contains('Piątek') == true) {
+              dayOffset = 5 - currentDate.weekday;
+            } else if (dzienTygodnia?.contains('Sobota') == true) {
+              dayOffset = 6 - currentDate.weekday;
+            } else if (dzienTygodnia?.contains('Niedziela') == true) {
+              dayOffset = 7 - currentDate.weekday;
+            }
 
-          // Pobierz rodzaj zajęć (W, Ć, L...)
-          final rzMatch = RegExp(r'\b([WĆLPSćwlps])\b').firstMatch(przedmiot);
-          final rz = rzMatch?.group(1);
+            // Jeśli dayOffset jest ujemny, przechodzimy do następnego tygodnia
+            if (dayOffset < 0) {
+              dayOffset += 7;
+            }
 
-          // Generuj UID
-          final contentToHash =
-              '${nauczyciel.id}-$przedmiot-$dataOd-$dataDo-$miejsce';
-          final uid = _generateUid(contentToHash);
+            // Data zajęć
+            final dataZajec = currentDate.add(Duration(days: dayOffset));
 
-          final plan = PlanNauczyciela(
-            uid: uid,
-            nauczycielId: nauczyciel.id,
-            od: dataOd,
-            do_: dataDo,
-            przedmiot: przedmiot,
-            rz: rz,
-            miejsce: miejsce,
-          );
+            // Parsowanie godzin
+            final odParts = odText.split(':');
+            final doParts = doText.split(':');
 
-          planyList.add(plan);
+            if (odParts.length == 2 && doParts.length == 2) {
+              final odGodzina = int.parse(odParts[0]);
+              final odMinuta = int.parse(odParts[1]);
+              final doGodzina = int.parse(doParts[0]);
+              final doMinuta = int.parse(doParts[1]);
+
+              final od = DateTime(
+                dataZajec.year,
+                dataZajec.month,
+                dataZajec.day,
+                odGodzina,
+                odMinuta,
+              );
+
+              final do_ = DateTime(
+                dataZajec.year,
+                dataZajec.month,
+                dataZajec.day,
+                doGodzina,
+                doMinuta,
+              );
+
+              // Generuj UID
+              final contentToHash = '${nauczyciel.id}-$przedmiot-$od-$do_-$miejsce';
+              final uid = _generateUid(contentToHash);
+
+              final plan = PlanNauczyciela(
+                uid: uid,
+                nauczycielId: nauczyciel.id!,
+                od: od,
+                do_: do_,
+                przedmiot: przedmiot,
+                rz: rzText,
+                miejsce: miejsce,
+                terminy: terminy,
+              );
+
+              planyList.add(plan);
+
+              // Zapisujemy linki do grup znalezionych w planie
+              final grupaLinks = cells[4].querySelectorAll('a[href*="grupy_plan.php?ID="]');
+              for (final grupaLink in grupaLinks) {
+                final grupaUrl = grupaLink.attributes['href'];
+                final grupaNazwa = grupaLink.text.trim();
+                final grupaIdMatch = RegExp(r'ID=(\d+)').firstMatch(grupaUrl ?? '');
+
+                if (grupaIdMatch != null) {
+                  final grupaUrlId = grupaIdMatch.group(1)!;
+                  Logger.info('Znaleziono grupę: $grupaNazwa, ID: $grupaUrlId dla nauczyciela ${nauczyciel.nazwa}');
+                }
+              }
+            }
+          } catch (e) {
+            Logger.error('Błąd podczas parsowania wiersza planu: $e');
+          }
         }
       }
 
       // Zapisz plany do bazy danych
       if (planyList.isNotEmpty) {
+        Logger.info('Znaleziono ${planyList.length} zajęć dla nauczyciela ${nauczyciel.nazwa}');
         await supabaseService.batchInsertPlanyNauczycieli(planyList);
+      } else {
+        Logger.info('Nie znaleziono zajęć dla nauczyciela ${nauczyciel.nazwa}');
       }
+    } else {
+      Logger.error('Błąd pobierania planu nauczyciela: ${response.statusCode}');
     }
   } catch (e) {
-    Logger.error(
-        'Błąd podczas pobierania planu nauczyciela ${nauczyciel.nazwa ?? nauczyciel.id}: $e');
+    Logger.error('Błąd podczas scrapowania planu nauczyciela ${nauczyciel.nazwa}: $e');
   }
 }
