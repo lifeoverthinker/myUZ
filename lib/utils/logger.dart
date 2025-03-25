@@ -1,17 +1,19 @@
+import 'dart:developer' as developer;
+
 class Logger {
   static void info(String message) {
-    print('[INFO] $message');
+    developer.log('[INFO] $message', name: 'myUZ');
   }
 
   static void error(String message) {
-    print('[ERROR] $message');
+    developer.log('[ERROR] $message', name: 'myUZ');
   }
 
   static void warning(String message) {
-    print('[WARNING] $message');
+    developer.log('[WARNING] $message', name: 'myUZ');
   }
 
   static void debug(String message) {
-    print('[DEBUG] $message');
+    developer.log('[DEBUG] $message', name: 'myUZ');
   }
 }

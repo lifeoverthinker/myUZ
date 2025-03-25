@@ -31,11 +31,11 @@ class Kierunek {
       };
 
   factory Kierunek.fromJson(Map<String, dynamic> json) => Kierunek(
-        id: json['id'],
-        nazwa: json['nazwa'],
-        url: json['url'],
-        ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
-            ? DateTime.parse(json['ostatnia_aktualizacja'])
-            : null,
-      );
+    id: json['id'],
+    nazwa: json['nazwa'],
+    url: json['url'],
+    ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
+        ? DateTime.parse(json['ostatnia_aktualizacja'])
+        : null,
+  );
 }

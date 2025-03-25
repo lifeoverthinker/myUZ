@@ -16,6 +16,7 @@ dependencies:
   icalendar_parser:
   intl:
   crypto:
+  uuid:
 
 dev_dependencies:
   flutter_test:

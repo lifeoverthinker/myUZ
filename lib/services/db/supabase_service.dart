@@ -1,9 +1,13 @@
 import 'package:supabase/supabase.dart';
+
+// Modele danych
+import 'package:my_uz/models/grupa.dart';
+import 'package:my_uz/models/kierunek.dart';
 import 'package:my_uz/models/nauczyciel.dart';
 import 'package:my_uz/models/plan_nauczyciela.dart';
 import 'package:my_uz/models/zajecia.dart';
-import 'package:my_uz/models/kierunek.dart';
-import 'package:my_uz/models/grupa.dart';
+
+// Konfiguracja i narzędzia
 import 'package:my_uz/config/app_config.dart';
 import 'package:my_uz/utils/logger.dart';
 
@@ -22,7 +26,6 @@ class SupabaseService {
 
   Future<List<Kierunek>> getAllKierunki() async {
     final response = await _client.from('kierunki').select().order('nazwa');
-
     return response.map<Kierunek>((json) => Kierunek.fromJson(json)).toList();
   }
 
@@ -58,7 +61,6 @@ class SupabaseService {
 
   Future<List<Grupa>> getAllGrupy() async {
     final response = await _client.from('grupy').select().order('nazwa');
-
     return (response as List).map((data) => Grupa.fromJson(data)).toList();
   }
 
@@ -138,6 +140,18 @@ class SupabaseService {
     return Nauczyciel.fromJson(response);
   }
 
+  Future<Nauczyciel?> getNauczycielByNazwa(String nazwa) async {
+    // Znajdź nauczyciela po nazwie
+    final response = await _client
+        .from('nauczyciele')
+        .select()
+        .eq('nazwa', nazwa)
+        .maybeSingle();
+
+    if (response == null) return null;
+    return Nauczyciel.fromJson(response);
+  }
+
   Future<Nauczyciel> createOrUpdateNauczyciel(Nauczyciel nauczyciel) async {
     // Sprawdź, czy nauczyciel już istnieje
     final existingNauczyciel = await getNauczycielByUrlId(nauczyciel.urlId);
@@ -158,6 +172,11 @@ class SupabaseService {
     }
   }
 
+  // Alias dla zachowania kompatybilności
+  Future<Nauczyciel?> findOrCreateNauczycielByNazwa(String nazwa) async {
+    return getNauczycielByNazwa(nazwa);
+  }
+
   // ======== METODY DLA ZAJĘĆ ========
 
   Future<int> getZajeciaCount() async {
@@ -168,6 +187,11 @@ class SupabaseService {
   Future<void> deleteZajeciaForGrupa(int grupaId) async {
     await _client.from('zajecia').delete().eq('grupa_id', grupaId);
     Logger.info('Usunięto stare zajęcia grupy: $grupaId');
+  }
+
+  Future<void> saveZajecia(Zajecia zajecie) async {
+    await _client.from('zajecia').upsert(zajecie.toJson());
+    Logger.info('Dodano zajęcie: ${zajecie.przedmiot}');
   }
 
   Future<void> batchInsertZajecia(List<Zajecia> zajecia) async {
@@ -203,18 +227,30 @@ class SupabaseService {
     }
   }
 
-  Future<void> batchInsertPlanNauczyciela(List<PlanNauczyciela> plany) async {
-    final data = plany.map((plan) => plan.toJson()).toList();
-    await _client.from('plany_nauczycieli').upsert(data);
-    Logger.info('Dodano ${plany.length} planów nauczyciela');
+  Future<void> savePlanNauczyciela(PlanNauczyciela plan) async {
+    await _client.from('plany_nauczycieli').upsert(plan.toJson());
+    Logger.info('Dodano plan nauczyciela: ${plan.przedmiot}');
   }
 
   Future<void> batchInsertPlanyNauczycieli(List<PlanNauczyciela> plany) async {
     try {
-      final data = plany.map((plan) => plan.toJson()).toList();
-      await _client.from('plany_nauczycieli').upsert(data);
+      const batchSize = 100; // Optymalna wielkość partii
+      for (var i = 0; i < plany.length; i += batchSize) {
+        final end =
+            (i + batchSize < plany.length) ? i + batchSize : plany.length;
+        final batch = plany.sublist(i, end);
+        final data = batch.map((plan) => plan.toJson()).toList();
+        await _client.from('plany_nauczycieli').upsert(data);
+        Logger.info(
+            'Dodano partię ${batch.length} planów (${i + batch.length}/${plany.length})');
+      }
     } catch (e) {
       Logger.error('Błąd podczas dodawania planów nauczycieli: $e');
     }
+  }
+
+  // Alias dla zachowania kompatybilności
+  Future<void> batchInsertPlanNauczyciela(List<PlanNauczyciela> plany) async {
+    return batchInsertPlanyNauczycieli(plany);
   }
 }

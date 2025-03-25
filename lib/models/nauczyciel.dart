@@ -4,6 +4,7 @@ class Nauczyciel {
   final String urlPlan;
   final String? nazwa;
   final String? email;
+  final String? urlIcs;
   final DateTime? ostatniaAktualizacja;
 
   Nauczyciel({
@@ -12,6 +13,7 @@ class Nauczyciel {
     required this.urlPlan,
     this.nazwa,
     this.email,
+    this.urlIcs,
     this.ostatniaAktualizacja,
   });
 
@@ -21,6 +23,7 @@ class Nauczyciel {
     String? urlPlan,
     String? nazwa,
     String? email,
+    String? urlIcs,
     DateTime? ostatniaAktualizacja,
   }) {
     return Nauczyciel(
@@ -29,25 +32,28 @@ class Nauczyciel {
       urlPlan: urlPlan ?? this.urlPlan,
       nazwa: nazwa ?? this.nazwa,
       email: email ?? this.email,
+      urlIcs: urlIcs ?? this.urlIcs,
       ostatniaAktualizacja: ostatniaAktualizacja ?? this.ostatniaAktualizacja,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'url_id': urlId,
-        'url_plan': urlPlan,
-        'nazwa': nazwa,
-        'email': email,
-      };
+    'url_id': urlId,
+    'url_plan': urlPlan,
+    'nazwa': nazwa,
+    'email': email,
+    'url_ics': urlIcs,
+  };
 
   factory Nauczyciel.fromJson(Map<String, dynamic> json) => Nauczyciel(
-        id: json['id'],
-        urlId: json['url_id'],
-        urlPlan: json['url_plan'],
-        nazwa: json['nazwa'],
-        email: json['email'],
-        ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
-            ? DateTime.parse(json['ostatnia_aktualizacja'])
-            : null,
-      );
+    id: json['id'],
+    urlId: json['url_id'],
+    urlPlan: json['url_plan'],
+    nazwa: json['nazwa'],
+    email: json['email'],
+    urlIcs: json['url_ics'],
+    ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
+        ? DateTime.parse(json['ostatnia_aktualizacja'])
+        : null,
+  );
 }
