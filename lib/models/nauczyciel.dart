@@ -1,59 +1,41 @@
 class Nauczyciel {
-  final int? id;
-  final String? urlId;
-  final String urlPlan;
-  final String? nazwa;
+  final int id;
   final String? email;
-  final String? urlIcs;
+  final String urlPlan;
   final DateTime? ostatniaAktualizacja;
+  final String? urlId;
+  final String? nazwa;
 
   Nauczyciel({
-    this.id,
-    this.urlId,
-    required this.urlPlan,
-    this.nazwa,
+    required this.id,
     this.email,
-    this.urlIcs,
+    required this.urlPlan,
     this.ostatniaAktualizacja,
+    this.urlId,
+    this.nazwa,
   });
 
-  Nauczyciel copyWith({
-    int? id,
-    String? urlId,
-    String? urlPlan,
-    String? nazwa,
-    String? email,
-    String? urlIcs,
-    DateTime? ostatniaAktualizacja,
-  }) {
+  factory Nauczyciel.fromJson(Map<String, dynamic> json) {
     return Nauczyciel(
-      id: id ?? this.id,
-      urlId: urlId ?? this.urlId,
-      urlPlan: urlPlan ?? this.urlPlan,
-      nazwa: nazwa ?? this.nazwa,
-      email: email ?? this.email,
-      urlIcs: urlIcs ?? this.urlIcs,
-      ostatniaAktualizacja: ostatniaAktualizacja ?? this.ostatniaAktualizacja,
+      id: json['id'] as int,
+      email: json['email'] as String?,
+      urlPlan: json['url_plan'] as String,
+      ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
+          ? DateTime.parse(json['ostatnia_aktualizacja'])
+          : null,
+      urlId: json['url_id'] as String?,
+      nazwa: json['nazwa'] as String?,
     );
   }
 
-  Map<String, dynamic> toJson() => {
-    'url_id': urlId,
-    'url_plan': urlPlan,
-    'nazwa': nazwa,
-    'email': email,
-    'url_ics': urlIcs,
-  };
-
-  factory Nauczyciel.fromJson(Map<String, dynamic> json) => Nauczyciel(
-    id: json['id'],
-    urlId: json['url_id'],
-    urlPlan: json['url_plan'],
-    nazwa: json['nazwa'],
-    email: json['email'],
-    urlIcs: json['url_ics'],
-    ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
-        ? DateTime.parse(json['ostatnia_aktualizacja'])
-        : null,
-  );
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'email': email,
+      'url_plan': urlPlan,
+      'ostatnia_aktualizacja': ostatniaAktualizacja?.toIso8601String(),
+      'url_id': urlId,
+      'nazwa': nazwa,
+    };
+  }
 }

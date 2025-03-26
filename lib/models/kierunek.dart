@@ -1,41 +1,59 @@
-class Kierunek {
-  final int? id;
-  final String nazwa;
-  final String url;
-  final DateTime? ostatniaAktualizacja;
+import 'package:equatable/equatable.dart';
 
-  Kierunek({
-    this.id,
+class Kierunek extends Equatable {
+  final String id;
+  final String nazwa;
+  final String wydzial;
+  final String url;
+
+  const Kierunek({
+    required this.id,
     required this.nazwa,
+    required this.wydzial,
     required this.url,
-    this.ostatniaAktualizacja,
   });
 
+  @override
+  List<Object?> get props => [id, nazwa, wydzial, url];
+
+  @override
+  String toString() => 'Kierunek(id: $id, nazwa: $nazwa, wydział: $wydzial)';
+
+  // Kopiowanie z możliwością nadpisania pól
   Kierunek copyWith({
-    int? id,
+    String? id,
     String? nazwa,
+    String? wydzial,
     String? url,
-    DateTime? ostatniaAktualizacja,
   }) {
     return Kierunek(
       id: id ?? this.id,
       nazwa: nazwa ?? this.nazwa,
+      wydzial: wydzial ?? this.wydzial,
       url: url ?? this.url,
-      ostatniaAktualizacja: ostatniaAktualizacja ?? this.ostatniaAktualizacja,
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        'nazwa': nazwa,
-        'url': url,
-      };
+  // Konwersja z JSON
+  factory Kierunek.fromJson(Map<String, dynamic> json) {
+    return Kierunek(
+      id: json['id'] as String,
+      nazwa: json['nazwa'] as String,
+      wydzial: json['wydzial'] as String? ?? '',
+      url: json['url'] as String? ?? '',
+    );
+  }
 
-  factory Kierunek.fromJson(Map<String, dynamic> json) => Kierunek(
-    id: json['id'],
-    nazwa: json['nazwa'],
-    url: json['url'],
-    ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
-        ? DateTime.parse(json['ostatnia_aktualizacja'])
-        : null,
-  );
+  // Konwersja do JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'nazwa': nazwa,
+      'wydzial': wydzial,
+      'url': url,
+    };
+  }
+
+  // Walidacja danych kierunku
+  bool get isValid => id.isNotEmpty && nazwa.isNotEmpty && url.isNotEmpty;
 }

@@ -1,51 +1,96 @@
+import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart';
+import 'package:my_uz/utils/logger.dart';
 
 class HttpService {
-  static final Map<String, String> _headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/91.0.4472.124',
-    'Accept': '*/*',
-  };
+  final http.Client _client;
+  final int maxRetries;
+  final Duration retryDelay;
+  final Duration timeout;
 
-  // Cache dla pobranych URL
-  static final Map<String, String> _cache = {};
+  HttpService({
+    http.Client? client,
+    this.maxRetries = 3,
+    this.retryDelay = const Duration(seconds: 1),
+    this.timeout = const Duration(seconds: 30),
+  }) : _client = client ?? http.Client();
 
-  static Future<String?> fetch(String url, {bool useCache = true}) async {
-    try {
-      // Sprawdź cache jeśli włączony
-      if (useCache && _cache.containsKey(url)) {
-        debugPrint('HttpService: Zwracanie z cache: $url');
-        return _cache[url];
-      }
+  // Metoda do wykonywania zapytania GET i pobierania ciała odpowiedzi
+  Future<String> getBody(String url) async {
+    Logger.debug('HTTP GET: $url');
+    int attempts = 0;
 
-      debugPrint('HttpService: Pobieranie: $url');
-      final response = await http.get(
-        Uri.parse(url),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 30));
+    while (attempts < maxRetries) {
+      try {
+        final response = await _client.get(Uri.parse(url)).timeout(timeout);
 
-      if (response.statusCode == 200) {
-        debugPrint('HttpService: Pobrano pomyślnie (${response.contentLength} bajtów)');
+        if (response.statusCode == 200) {
+          Logger.debug('Otrzymano odpowiedź HTTP 200 OK (${response.contentLength} bajtów)');
+          return response.body;
+        } else {
+          final error = 'Błąd HTTP ${response.statusCode}: ${response.reasonPhrase}';
+          Logger.error(error);
 
-        // Zapisz do cache
-        if (useCache) {
-          _cache[url] = response.body;
+          if (_shouldRetry(response.statusCode) && attempts < maxRetries - 1) {
+            attempts++;
+            await Future.delayed(retryDelay);
+            continue;
+          }
+
+          throw Exception(error);
         }
-
-        return response.body;
-      } else {
-        debugPrint('HttpService: Błąd HTTP: ${response.statusCode}');
-        return null;
+      } catch (e, stackTrace) {
+        if (attempts < maxRetries - 1) {
+          Logger.warning('Ponawiam próbę po błędzie', e);
+          attempts++;
+          await Future.delayed(retryDelay);
+        } else {
+          Logger.error('Błąd podczas wykonywania zapytania HTTP', e, stackTrace);
+          rethrow;
+        }
       }
-    } catch (e) {
-      debugPrint('HttpService: Wyjątek: $e');
-      return null;
+    }
+
+    throw Exception('Przekroczono maksymalną liczbę prób');
+  }
+
+  bool _shouldRetry(int statusCode) {
+    return statusCode >= 500 || statusCode == 429;
+  }
+
+  // Metoda do wykonywania zapytania GET i dekodowania odpowiedzi JSON
+  Future<Map<String, dynamic>> getJson(String url) async {
+    final body = await getBody(url);
+
+    try {
+      return json.decode(body) as Map<String, dynamic>;
+    } catch (e, stackTrace) {
+      Logger.error('Błąd podczas dekodowania JSON', e, stackTrace);
+      rethrow;
     }
   }
 
-  // Czyszczenie cache
-  static void clearCache() {
-    _cache.clear();
-    debugPrint('HttpService: Cache wyczyszczony');
+  // Metoda do wykonywania zapytania POST
+  Future<http.Response> post(String url, {Map<String, dynamic>? body}) async {
+    Logger.debug('HTTP POST: $url');
+
+    try {
+      final response = await _client.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: body != null ? json.encode(body) : null,
+      ).timeout(timeout);
+
+      Logger.debug('POST odpowiedź: ${response.statusCode}');
+      return response;
+    } catch (e, stackTrace) {
+      Logger.error('Błąd podczas wykonywania zapytania POST', e, stackTrace);
+      rethrow;
+    }
+  }
+
+  // Metoda do zamykania klienta HTTP
+  void dispose() {
+    _client.close();
   }
 }

@@ -1,68 +1,133 @@
-import 'package:http/http.dart' as http;
-import 'package:html/parser.dart' show parse;
+import 'package:html/parser.dart' as html;
 import 'package:my_uz/models/nauczyciel.dart';
-import 'package:my_uz/models/plan_nauczyciela.dart';
-import 'package:my_uz/services/db/supabase_service.dart';
+import 'package:my_uz/services/http_service.dart';
 import 'package:my_uz/utils/logger.dart';
-import 'package:intl/intl.dart';
-import 'package:uuid/uuid.dart';
 
-Future<void> scrapeNauczyciel(List<Nauczyciel> nauczyciele, SupabaseService supabaseService, {Map<String, dynamic>? checkpoint}) async {
-  try {
-    Logger.info('Rozpoczynam pobieranie zajęć dla ${nauczyciele.length} nauczycieli');
-    final uuid = Uuid();
+class ScraperNauczyciel {
+  final HttpService _httpService;
+  static const String _baseUrl = 'https://plan.uz.zgora.pl';
+  static const String _nauczycielPath = '/nauczyciel.php';
 
-    for (var nauczyciel in nauczyciele) {
-      Logger.info('Przetwarzanie zajęć dla: ${nauczyciel.nazwa}');
+  ScraperNauczyciel({HttpService? httpService})
+      : _httpService = httpService ?? HttpService();
 
-      final url = 'https://aplikacje.uz.zgora.pl/studia/plan_nauczyciela.php?id=${nauczyciel.urlId}';
-      final response = await http.get(Uri.parse(url));
+  Future<Nauczyciel?> scrapeNauczyciel(String nauczycielId) async {
+    Logger.info(
+        'Rozpoczynam pobieranie danych nauczyciela o ID: $nauczycielId');
 
-      if (response.statusCode != 200) {
-        Logger.error('Nie udało się pobrać zajęć dla nauczyciela: ${response.statusCode}');
-        continue;
+    try {
+      final url = '$_baseUrl$_nauczycielPath?id_nauczyciel=$nauczycielId';
+      Logger.debug('Pobieranie danych z: $url');
+
+      final response = await _httpService.getBody(url);
+
+      if (response.isEmpty) {
+        Logger.error(
+            'Otrzymano pustą odpowiedź przy próbie pobrania danych nauczyciela $nauczycielId');
+        return null;
       }
 
-      final document = parse(response.body);
-      final zajeciaElements = document.querySelectorAll('table.plan tr:not(:first-child)');
+      final document = html.parse(response);
 
-      for (var element in zajeciaElements) {
-        final cells = element.querySelectorAll('td');
-        if (cells.length < 5) continue;
+      // Pobieramy imię i nazwisko z nagłówka
+      final headerElements = document.querySelectorAll('h1');
+      if (headerElements.isEmpty) {
+        Logger.error(
+            'Nie znaleziono nagłówka z imieniem i nazwiskiem nauczyciela $nauczycielId');
+        return null;
+      }
 
-        final przedmiot = cells[0].text.trim();
-        final grupaText = cells[1].text.trim();
-        final dataStr = cells[2].text.trim();
-        final godzinaRozpoczecia = cells[3].text.trim();
-        final godzinaZakonczenia = cells[4].text.trim();
-        final miejsce = cells.length > 5 ? cells[5].text.trim() : null;
-        final rz = cells.length > 6 ? cells[6].text.trim() : null;
+      final nazwa = headerElements.first.text.trim();
 
-        try {
-          final formatter = DateFormat('dd.MM.yyyy HH:mm');
-          final od = formatter.parse('$dataStr $godzinaRozpoczecia');
-          final do_ = formatter.parse('$dataStr $godzinaZakonczenia');
+      // Parsowanie danych kontaktowych
+      String? email;
 
-          final planNauczyciela = PlanNauczyciela(
-            uid: uuid.v4(),
-            od: od,
-            do_: do_,
-            przedmiot: przedmiot,
-            nauczycielId: nauczyciel.id,
-            miejsce: miejsce,
-            rz: rz,
-            terminy: grupaText // Zapisujemy informację o grupie w polu terminy
-          );
+      final tableElements = document.querySelectorAll('table.tabela');
+      if (tableElements.isNotEmpty) {
+        final rows = tableElements.first.querySelectorAll('tr');
 
-          await supabaseService.savePlanNauczyciela(planNauczyciela);
-        } catch (e) {
-          Logger.error('Błąd parsowania daty dla zajęć nauczyciela: $e');
-          continue;
+        for (final row in rows) {
+          final cells = row.querySelectorAll('td');
+          if (cells.length >= 2) {
+            final label = cells[0].text.trim().toLowerCase();
+            final value = cells[1].text.trim();
+
+            if (label.contains('e-mail')) {
+              email = value;
+            }
+            // Pozostałe dane (telefon, konsultacje, katedra) nie są zapisywane w bazie
+          }
         }
       }
+
+      // Walidacja email
+      if (email != null) {
+        if (email.isEmpty) {
+          email = null;
+        } else if (!email.contains('@')) {
+          email = null;
+        }
+      }
+
+      // Tworzymy obiekt nauczyciela
+      Nauczyciel nauczyciel = Nauczyciel(
+        id: 0,
+        urlPlan: url,
+        urlId: nauczycielId,
+        nazwa: nazwa,
+        email: email,
+      );
+
+      Logger.info(
+          'Pomyślnie pobrano dane nauczyciela: ${nauczyciel.nazwa ?? "brak nazwy"}');
+      return nauczyciel;
+    } catch (e, stackTrace) {
+      Logger.error(
+          'Wystąpił błąd podczas pobierania danych nauczyciela $nauczycielId',
+          e,
+          stackTrace);
+      rethrow;
     }
-  } catch (e, stack) {
-    Logger.error('Błąd podczas scrapowania zajęć nauczycieli: $e');
-    Logger.error('Stack: $stack');
+  }
+
+  String? extractEmailFromText(String text) {
+    final emailRegex =
+        RegExp(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}');
+    final match = emailRegex.firstMatch(text);
+    return match?.group(0);
+  }
+
+  Future<bool> validateNauczycielData(Nauczyciel nauczyciel) async {
+    Logger.debug(
+        'Walidacja danych nauczyciela: ${nauczyciel.nazwa ?? "brak nazwy"}');
+
+    final errors = <String>[];
+
+    // Sprawdzenie nazwy
+    final nazwa = nauczyciel.nazwa;
+    if (nazwa == null || nazwa.isEmpty) {
+      errors.add('Brak imienia i nazwiska');
+    } else if (!nazwa.contains(' ')) {
+      errors.add('Niepoprawny format imienia i nazwiska: $nazwa');
+    }
+
+    // Sprawdzenie email
+    final email = nauczyciel.email;
+    if (email != null && email.isNotEmpty) {
+      final emailMatch =
+          RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+              .hasMatch(email);
+      if (!emailMatch) {
+        errors.add('Niepoprawny format adresu email: $email');
+      }
+    }
+
+    if (errors.isNotEmpty) {
+      Logger.warning(
+          'Znaleziono problemy z danymi nauczyciela ${nauczyciel.nazwa ?? "brak nazwy"}: ${errors.join(', ')}');
+      return false;
+    }
+
+    return true;
   }
 }

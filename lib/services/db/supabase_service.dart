@@ -1,256 +1,155 @@
-import 'package:supabase/supabase.dart';
-
-// Modele danych
-import 'package:my_uz/models/grupa.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:my_uz/models/kierunek.dart';
+import 'package:my_uz/models/grupa.dart';
+import 'package:my_uz/models/zajecia.dart';
 import 'package:my_uz/models/nauczyciel.dart';
 import 'package:my_uz/models/plan_nauczyciela.dart';
-import 'package:my_uz/models/zajecia.dart';
-
-// Konfiguracja i narzędzia
-import 'package:my_uz/config/app_config.dart';
 import 'package:my_uz/utils/logger.dart';
 
 class SupabaseService {
+  final String url;
+  final String serviceRoleKey;
   late final SupabaseClient _client;
 
-  // KONSTRUKTOR
-  SupabaseService() {
-    _client = SupabaseClient(
-      AppConfig.supabaseUrl,
-      AppConfig.supabaseKey,
-    );
+  SupabaseService({required this.url, required this.serviceRoleKey}) {
+    _client = SupabaseClient(url, serviceRoleKey);
+    Logger.info('Inicjalizacja serwisu Supabase: $url');
   }
 
-  // ======== METODY DLA KIERUNKÓW ========
+  // ===== KIERUNKI =====
 
-  Future<List<Kierunek>> getAllKierunki() async {
-    final response = await _client.from('kierunki').select().order('nazwa');
-    return response.map<Kierunek>((json) => Kierunek.fromJson(json)).toList();
-  }
-
-  Future<Kierunek?> getKierunekByUrl(String url) async {
-    final response =
-        await _client.from('kierunki').select().eq('url', url).maybeSingle();
-
-    if (response == null) return null;
-    return Kierunek.fromJson(response);
-  }
-
-  Future<Kierunek> createOrUpdateKierunek(Kierunek kierunek) async {
-    // Sprawdź, czy kierunek już istnieje
-    final existingKierunek = await getKierunekByUrl(kierunek.url);
-
-    if (existingKierunek != null) {
-      await _client
-          .from('kierunki')
-          .update(kierunek.toJson())
-          .eq('id', existingKierunek.id.toString());
-      return kierunek.copyWith(id: existingKierunek.id);
-    } else {
-      final response = await _client
-          .from('kierunki')
-          .insert(kierunek.toJson())
-          .select()
-          .single();
-      return Kierunek.fromJson(response);
-    }
-  }
-
-  // ======== METODY DLA GRUP ========
-
-  Future<List<Grupa>> getAllGrupy() async {
-    final response = await _client.from('grupy').select().order('nazwa');
-    return (response as List).map((data) => Grupa.fromJson(data)).toList();
-  }
-
-  Future<List<Grupa>> getGrupyByKierunekId(int kierunekId) async {
-    final response = await _client
-        .from('grupy')
-        .select()
-        .eq('kierunek_id', kierunekId)
-        .order('nazwa');
-
-    return response.map<Grupa>((json) => Grupa.fromJson(json)).toList();
-  }
-
-  Future<Grupa?> getGrupaByUrlIcs(String urlIcs) async {
-    final response = await _client
-        .from('grupy')
-        .select()
-        .eq('url_ics', urlIcs)
-        .maybeSingle();
-
-    if (response == null) return null;
-    return Grupa.fromJson(response);
-  }
-
-  Future<Grupa> createOrUpdateGrupa(Grupa grupa) async {
-    // Sprawdź, czy grupa już istnieje
-    final existingGrupa = await getGrupaByUrlIcs(grupa.urlIcs);
-
-    if (existingGrupa != null) {
-      await _client
-          .from('grupy')
-          .update(grupa.toJson())
-          .eq('id', existingGrupa.id.toString());
-      return grupa.copyWith(id: existingGrupa.id);
-    } else {
-      final response =
-          await _client.from('grupy').insert(grupa.toJson()).select().single();
-      return Grupa.fromJson(response);
-    }
-  }
-
-  // ======== METODY DLA NAUCZYCIELI ========
-
-  Future<List<Nauczyciel>> getAllNauczyciele() async {
+  Future<int> createOrUpdateKierunek(Kierunek kierunek) async {
     try {
-      final response = await _client.from('nauczyciele').select();
-      return response
-          .map<Nauczyciel>((json) => Nauczyciel.fromJson(json))
-          .toList();
-    } catch (e) {
-      Logger.error('Błąd podczas pobierania nauczycieli: $e');
-      return [];
-    }
-  }
-
-  Future<Nauczyciel?> getNauczycielByUrlId(String? urlId) async {
-    if (urlId == null) return null;
-
-    final response = await _client
-        .from('nauczyciele')
-        .select()
-        .eq('url_id', urlId)
-        .maybeSingle();
-
-    if (response == null) return null;
-    return Nauczyciel.fromJson(response);
-  }
-
-  Future<Nauczyciel?> getNauczycielByUrlPlan(String urlPlan) async {
-    final response = await _client
-        .from('nauczyciele')
-        .select()
-        .eq('url_plan', urlPlan)
-        .maybeSingle();
-
-    if (response == null) return null;
-    return Nauczyciel.fromJson(response);
-  }
-
-  Future<Nauczyciel?> getNauczycielByNazwa(String nazwa) async {
-    // Znajdź nauczyciela po nazwie
-    final response = await _client
-        .from('nauczyciele')
-        .select()
-        .eq('nazwa', nazwa)
-        .maybeSingle();
-
-    if (response == null) return null;
-    return Nauczyciel.fromJson(response);
-  }
-
-  Future<Nauczyciel> createOrUpdateNauczyciel(Nauczyciel nauczyciel) async {
-    // Sprawdź, czy nauczyciel już istnieje
-    final existingNauczyciel = await getNauczycielByUrlId(nauczyciel.urlId);
-
-    if (existingNauczyciel != null) {
-      await _client
-          .from('nauczyciele')
-          .update(nauczyciel.toJson())
-          .eq('id', existingNauczyciel.id.toString());
-      return nauczyciel.copyWith(id: existingNauczyciel.id);
-    } else {
       final response = await _client
-          .from('nauczyciele')
-          .insert(nauczyciel.toJson())
-          .select()
+          .from('kierunki')
+          .upsert(kierunek.toJson())
+          .select('id')
           .single();
-      return Nauczyciel.fromJson(response);
+
+      return response['id'];
+    } catch (e, stackTrace) {
+      Logger.error('Błąd podczas zapisywania kierunku', e, stackTrace);
+      rethrow;
     }
   }
 
-  // Alias dla zachowania kompatybilności
-  Future<Nauczyciel?> findOrCreateNauczycielByNazwa(String nazwa) async {
-    return getNauczycielByNazwa(nazwa);
-  }
+  // ===== GRUPY =====
 
-  // ======== METODY DLA ZAJĘĆ ========
+  Future<int> createOrUpdateGrupa(Grupa grupa) async {
+    try {
+      final response = await _client
+          .from('grupy')
+          .upsert(grupa.toJson())
+          .select('id')
+          .single();
 
-  Future<int> getZajeciaCount() async {
-    final response = await _client.from('zajecia').select('count').single();
-    return response['count'] ?? 0;
-  }
-
-  Future<void> deleteZajeciaForGrupa(int grupaId) async {
-    await _client.from('zajecia').delete().eq('grupa_id', grupaId);
-    Logger.info('Usunięto stare zajęcia grupy: $grupaId');
-  }
-
-  Future<void> saveZajecia(Zajecia zajecie) async {
-    await _client.from('zajecia').upsert(zajecie.toJson());
-    Logger.info('Dodano zajęcie: ${zajecie.przedmiot}');
-  }
-
-  Future<void> batchInsertZajecia(List<Zajecia> zajecia) async {
-    const batchSize = 100; // Optymalna wielkość partii
-    for (var i = 0; i < zajecia.length; i += batchSize) {
-      final end =
-          (i + batchSize < zajecia.length) ? i + batchSize : zajecia.length;
-      final batch = zajecia.sublist(i, end);
-      final data = batch.map((z) => z.toJson()).toList();
-      await _client.from('zajecia').upsert(data);
-      Logger.info(
-          'Dodano partię ${batch.length} zajęć (${i + batch.length}/${zajecia.length})');
+      return response['id'];
+    } catch (e, stackTrace) {
+      Logger.error('Błąd podczas zapisywania grupy', e, stackTrace);
+      rethrow;
     }
   }
 
-  // ======== METODY DLA PLANÓW NAUCZYCIELI ========
+  // ===== ZAJĘCIA =====
 
-  Future<int> getPlanyNauczycieliCount() async {
-    final response =
-        await _client.from('plany_nauczycieli').select('count').single();
-    return response['count'] ?? 0;
+  Future<void> saveZajecia(List<Zajecia> zajecia) async {
+    if (zajecia.isEmpty) return;
+
+    try {
+      await _client.from('zajecia').upsert(
+            zajecia.map((z) => z.toJson()).toList(),
+          );
+      Logger.info('Zapisano ${zajecia.length} zajęć');
+    } catch (e, stackTrace) {
+      Logger.error('Błąd podczas zapisywania zajęć', e, stackTrace);
+      rethrow;
+    }
   }
 
   Future<void> deleteZajeciaForNauczyciel(int nauczycielId) async {
+    try {
+      await _client.from('zajecia').delete().eq('nauczyciel_id', nauczycielId);
+      Logger.info('Usunięto zajęcia dla nauczyciela: $nauczycielId');
+    } catch (e, stackTrace) {
+      Logger.error('Błąd podczas usuwania zajęć nauczyciela', e, stackTrace);
+      rethrow;
+    }
+  }
+
+  // ===== PLANY NAUCZYCIELI =====
+
+  Future<void> batchInsertPlanNauczyciela(List<PlanNauczyciela> plany) async {
+    if (plany.isEmpty) return;
+
+    try {
+      await _client.from('plany_nauczycieli').upsert(
+            plany.map((p) => p.toJson()).toList(),
+          );
+      Logger.info('Zapisano ${plany.length} planów nauczycieli');
+    } catch (e, stackTrace) {
+      Logger.error(
+          'Błąd podczas zapisywania planów nauczycieli', e, stackTrace);
+      rethrow;
+    }
+  }
+
+  Future<void> deleteZajeciaForNauczycielFromPlany(int nauczycielId) async {
     try {
       await _client
           .from('plany_nauczycieli')
           .delete()
           .eq('nauczyciel_id', nauczycielId);
-      Logger.info('Usunięto stare zajęcia nauczyciela: $nauczycielId');
-    } catch (e) {
-      Logger.error('Błąd podczas usuwania zajęć nauczyciela: $e');
+      Logger.info('Usunięto plany dla nauczyciela: $nauczycielId');
+    } catch (e, stackTrace) {
+      Logger.error('Błąd podczas usuwania planów nauczyciela', e, stackTrace);
+      rethrow;
     }
   }
 
-  Future<void> savePlanNauczyciela(PlanNauczyciela plan) async {
-    await _client.from('plany_nauczycieli').upsert(plan.toJson());
-    Logger.info('Dodano plan nauczyciela: ${plan.przedmiot}');
-  }
+  // ===== NAUCZYCIELE =====
 
-  Future<void> batchInsertPlanyNauczycieli(List<PlanNauczyciela> plany) async {
+  Future<List<int>> getUniqueNauczycielIds() async {
     try {
-      const batchSize = 100; // Optymalna wielkość partii
-      for (var i = 0; i < plany.length; i += batchSize) {
-        final end =
-            (i + batchSize < plany.length) ? i + batchSize : plany.length;
-        final batch = plany.sublist(i, end);
-        final data = batch.map((plan) => plan.toJson()).toList();
-        await _client.from('plany_nauczycieli').upsert(data);
-        Logger.info(
-            'Dodano partię ${batch.length} planów (${i + batch.length}/${plany.length})');
+      final response = await _client
+          .from('zajecia')
+          .select('nauczyciel_id')
+          .not('nauczyciel_id', 'is', null);
+
+      final idSet = <int>{};
+
+      for (final item in response) {
+        final id = item['nauczyciel_id'];
+        if (id != null) {
+          idSet.add(id);
+        }
       }
-    } catch (e) {
-      Logger.error('Błąd podczas dodawania planów nauczycieli: $e');
+
+      return idSet.toList();
+    } catch (e, stackTrace) {
+      Logger.error('Błąd podczas pobierania ID nauczycieli', e, stackTrace);
+      return [];
     }
   }
 
-  // Alias dla zachowania kompatybilności
-  Future<void> batchInsertPlanNauczyciela(List<PlanNauczyciela> plany) async {
-    return batchInsertPlanyNauczycieli(plany);
+  Future<int> saveNauczyciel(Nauczyciel nauczyciel) async {
+    try {
+      await _client.from('nauczyciele').upsert(nauczyciel.toJson());
+      return nauczyciel.id;
+    } catch (e, stackTrace) {
+      Logger.error('Błąd podczas zapisywania nauczyciela', e, stackTrace);
+      rethrow;
+    }
+  }
+
+  Future<Nauczyciel?> getNauczycielById(int id) async {
+    try {
+      final response =
+          await _client.from('nauczyciele').select().eq('id', id).single();
+
+      return Nauczyciel.fromJson(response);
+    } catch (e) {
+      Logger.warning('Nauczyciel o ID $id nie istnieje');
+      return null;
+    }
   }
 }

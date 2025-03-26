@@ -7,13 +7,41 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # Maksymalny czas wykonania - 2 godziny
     steps:
-      - uses: actions/checkout@v2
-      - uses: subosito/flutter-action@v2
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.29.2'
-      - run: flutter pub get
-      - run: dart run bin/scraper.dart
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Validate environment variables
+        run: |
+          echo "Sprawdzanie zmiennych środowiskowych..."
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
+            echo "BŁĄD: Wymagane zmienne środowiskowe nie są ustawione."
+            exit 1
+          fi
+          echo "Weryfikacja zmiennych środowiskowych zakończona pomyślnie."
+
+      - name: Run scraper with detailed logging
+        id: run_scraper
+        continue-on-error: true
+        run: |
+          dart --enable-asserts run bin/scraper.dart
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LOG_LEVEL: 'DEBUG'
+
+      - name: Check scraper result
+        if: steps.run_scraper.outcome == 'failure'
+        run: |
+          echo "Scraper napotkał problemy podczas wykonania."
+          echo "Sprawdź logi powyżej, aby zidentyfikować problem."
+          exit 1

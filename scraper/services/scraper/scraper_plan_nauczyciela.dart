@@ -5,7 +5,8 @@ import 'package:my_uz/models/plan_nauczyciela.dart';
 import 'package:my_uz/services/db/supabase_service.dart';
 import 'package:my_uz/utils/logger.dart';
 
-Future<void> scrapePlanNauczyciela(List<Nauczyciel> nauczyciele, SupabaseService supabaseService) async {
+Future<void> scrapePlanNauczyciela(
+    List<Nauczyciel> nauczyciele, SupabaseService supabaseService) async {
   try {
     Logger.info('Rozpoczeto aktualizacje planow nauczycieli');
 
@@ -21,47 +22,29 @@ Future<void> scrapePlanNauczyciela(List<Nauczyciel> nauczyciele, SupabaseService
       final response = await http.get(Uri.parse(nauczyciel.urlPlan));
 
       if (response.statusCode == 200) {
-        final icsString = response.body;
-        final icsData = ICalendar.fromString(icsString);
+        // Przetwarzanie pliku ICS
+        final icalendar = ICalendar.fromString(response.body);
+        final events =
+            icalendar.data.where((data) => data['type'] == 'VEVENT').toList();
 
-        List<PlanNauczyciela> plany = [];
+        final plany = events.map((event) {
+          return PlanNauczyciela(
+            uid: event['uid'],
+            nauczycielId: nauczyciel.id,
+            od: DateTime.parse(event['dtstart']),
+            do_: DateTime.parse(event['dtend']),
+            przedmiot: event['summary'],
+            rz: event['description'],
+            miejsce: event['location'],
+            terminy: event['rrule'],
+            ostatniaAktualizacja: DateTime.now(),
+          );
+        }).toList();
 
-        for (var event in icsData.data) {
-          final uid = event['UID'] as String?;
-          final dtstart = event['DTSTART'] as DateTime?;
-          final dtend = event['DTEND'] as DateTime?;
-          final summary = event['SUMMARY'] as String?;
-          final location = event['LOCATION'] as String?;
-          final description = event['DESCRIPTION'] as String?;
-
-          if (uid != null && dtstart != null && dtend != null && summary != null) {
-            final plan = PlanNauczyciela(
-              uid: uid,
-              nauczycielId: nauczyciel.id!,
-              od: dtstart,
-              do_: dtend,
-              przedmiot: summary,
-              rz: description ?? '',
-              miejsce: location ?? '',
-              terminy: '',
-            );
-
-            plany.add(plan);
-          }
-        }
-
-        if (plany.isNotEmpty) {
-          await supabaseService.deleteZajeciaForNauczyciel(nauczyciel.id!);
-          await supabaseService.batchInsertPlanNauczyciela(plany);
-          Logger.info(
-              'Dodano ${plany.length} zajec dla nauczyciela ${nauczyciel.nazwa}');
-        } else {
-          Logger.warning(
-              'Nie znaleziono planu dla nauczyciela ${nauczyciel.nazwa}');
-        }
+        await supabaseService.batchInsertPlanNauczyciela(plany);
       } else {
-        Logger.error(
-            'Blad pobierania planu dla nauczyciela ${nauczyciel.nazwa}. Kod: ${response.statusCode}');
+        Logger.warning(
+            'Nie udalo sie pobrac planu dla nauczyciela: ${nauczyciel.nazwa}');
       }
     }
 

@@ -1,6 +1,6 @@
 class PlanNauczyciela {
-  final String? uid;
-  final int? nauczycielId;
+  final String uid;
+  final int nauczycielId;
   final DateTime od;
   final DateTime do_;
   final String przedmiot;
@@ -10,8 +10,8 @@ class PlanNauczyciela {
   final DateTime? ostatniaAktualizacja;
 
   PlanNauczyciela({
-    this.uid,
-    this.nauczycielId,
+    required this.uid,
+    required this.nauczycielId,
     required this.od,
     required this.do_,
     required this.przedmiot,
@@ -20,19 +20,6 @@ class PlanNauczyciela {
     this.terminy,
     this.ostatniaAktualizacja,
   });
-
-  Map<String, dynamic> toJson() {
-    return {
-      'uid': uid,
-      'nauczyciel_id': nauczycielId,
-      'od': od.toIso8601String(),
-      'do': do_.toIso8601String(),
-      'przedmiot': przedmiot,
-      'rz': rz,
-      'miejsce': miejsce,
-      'terminy': terminy,
-    };
-  }
 
   factory PlanNauczyciela.fromJson(Map<String, dynamic> json) {
     return PlanNauczyciela(
@@ -48,5 +35,19 @@ class PlanNauczyciela {
           ? DateTime.parse(json['ostatnia_aktualizacja'])
           : null,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'uid': uid,
+      'nauczyciel_id': nauczycielId,
+      'od': od.toIso8601String(),
+      'do': do_.toIso8601String(),
+      'przedmiot': przedmiot,
+      'rz': rz,
+      'miejsce': miejsce,
+      'terminy': terminy,
+      'ostatnia_aktualizacja': ostatniaAktualizacja?.toIso8601String(),
+    };
   }
 }

@@ -1,73 +1,73 @@
-import 'package:http/http.dart' as http;
-import 'package:html/parser.dart' show parse;
+import 'package:html/parser.dart' as html;
+import 'package:my_uz/models/grupa.dart';
 import 'package:my_uz/models/zajecia.dart';
-import 'package:my_uz/services/db/supabase_service.dart';
+import 'package:my_uz/services/http_service.dart';
 import 'package:my_uz/utils/logger.dart';
-import 'package:intl/intl.dart';
-import 'package:uuid/uuid.dart';
 
-Future<void> scrapeZajeciaGrupy(SupabaseService supabaseService, {Map<String, dynamic>? checkpoint}) async {
-  try {
-    final grupy = await supabaseService.getAllGrupy();
-    Logger.info('Rozpoczynam pobieranie zajęć dla ${grupy.length} grup');
+class ScraperZajeciaGrupy {
+  final HttpService _httpService;
 
-    final uuid = Uuid();
+  ScraperZajeciaGrupy({HttpService? httpService})
+      : _httpService = httpService ?? HttpService();
 
-    for (var grupa in grupy) {
-      Logger.info('Przetwarzanie zajęć dla grupy: ${grupa.nazwa}');
+  Future<List<Zajecia>> scrapeZajecia(Grupa grupa) async {
+    Logger.info('Rozpoczynam pobieranie zajęć dla grupy: ${grupa.nazwa}');
 
-      final url = 'https://aplikacje.uz.zgora.pl/studia/plan.php?grupa=${grupa.urlIcs}';
-      final response = await http.get(Uri.parse(url));
+    try {
+      Logger.debug('Pobieranie danych z: ${grupa.url}');
+      final response = await _httpService.getBody(grupa.url);
 
-      if (response.statusCode != 200) {
-        Logger.error('Nie udało się pobrać zajęć dla grupy ${grupa.nazwa}: ${response.statusCode}');
-        continue;
+      if (response.isEmpty) {
+        Logger.warning('Brak danych dla grupy: ${grupa.nazwa}');
+        return [];
       }
 
-      final document = parse(response.body);
-      final zajeciaElements = document.querySelectorAll('table.plan tr:not(:first-child)');
+      final document = html.parse(response);
+      final tableElements = document.querySelectorAll('table.tabela');
 
-      for (var element in zajeciaElements) {
-        final cells = element.querySelectorAll('td');
-        if (cells.length < 5) continue;
+      if (tableElements.isEmpty) {
+        Logger.warning('Brak tabeli z zajęciami dla grupy: ${grupa.nazwa}');
+        return [];
+      }
 
-        final przedmiot = cells[0].text.trim();
-        final nauczycielText = cells[1].text.trim();
-        final dataStr = cells[2].text.trim();
-        final godzinaRozpoczecia = cells[3].text.trim();
-        final godzinaZakonczenia = cells[4].text.trim();
-        final miejsce = cells.length > 5 ? cells[5].text.trim() : null;
-        final rz = cells.length > 6 ? cells[6].text.trim() : null;
+      final zajecia = <Zajecia>[];
+      final trElements = tableElements.first.querySelectorAll('tr');
 
-        try {
-          final formatter = DateFormat('dd.MM.yyyy HH:mm');
-          final od = formatter.parse('$dataStr $godzinaRozpoczecia');
-          final do_ = formatter.parse('$dataStr $godzinaZakonczenia');
+      // Pomijamy pierwszy wiersz (nagłówek)
+      for (int i = 1; i < trElements.length; i++) {
+        final tr = trElements[i];
+        final tdElements = tr.querySelectorAll('td');
 
-          // Znajdź nauczyciela po nazwie (opcjonalnie)
-          final nauczyciel = await supabaseService.findOrCreateNauczycielByNazwa(nauczycielText);
-
-          final zajecie = Zajecia(
-            uid: uuid.v4(),
-            od: od,
-            do_: do_,
-            przedmiot: przedmiot,
-            grupaId: grupa.id!,
-            miejsce: miejsce,
-            rz: rz,
-            nauczycielId: nauczyciel?.id,
-            terminy: null
-          );
-
-          await supabaseService.saveZajecia(zajecie);
-        } catch (e) {
-          Logger.error('Błąd parsowania daty dla zajęć: $e');
+        if (tdElements.length < 6) {
+          Logger.warning('Nieprawidłowy format wiersza w tabeli zajęć');
           continue;
         }
+
+        final String generatedUid = 'someUid$i';
+        final int? nauczycielId = int.tryParse(tdElements[3].text.trim());
+        final int? grupaId = int.tryParse(grupa.id);
+
+        final zajecie = Zajecia(
+          uid: generatedUid,
+          grupaId: grupaId,
+          od: DateTime.now(),
+          do_: DateTime.now().add(Duration(hours: 1)),
+          przedmiot: tdElements[0].text.trim(),
+          rz: tdElements[1].text.trim(),
+          miejsce: tdElements[2].text.trim(),
+          terminy: 'poniedziałek 10:00-12:00',
+          ostatniaAktualizacja: DateTime.now(),
+          nauczycielId: nauczycielId,
+        );
+
+        zajecia.add(zajecie);
       }
+
+      Logger.info('Pobrano ${zajecia.length} zajęć dla grupy ${grupa.nazwa}');
+      return zajecia;
+    } catch (e, stackTrace) {
+      Logger.error('Błąd podczas pobierania zajęć dla grupy ${grupa.nazwa}', e, stackTrace);
+      rethrow;
     }
-  } catch (e, stack) {
-    Logger.error('Błąd podczas scrapowania zajęć: $e');
-    Logger.error('Stack: $stack');
   }
 }

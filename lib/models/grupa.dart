@@ -1,47 +1,87 @@
-class Grupa {
-  final int? id;
-  final String nazwa;
-  final int? kierunekId;
-  final String urlIcs;
-  final DateTime? ostatniaAktualizacja;
+import 'package:equatable/equatable.dart';
 
-  Grupa({
-    this.id,
+class Grupa extends Equatable {
+  final String id;
+  final String nazwa;
+  final String kierunekId;
+  final String url;
+  final String rodzajStudiow;
+  final String rokAkademicki;
+  final String semestr;
+
+  const Grupa({
+    required this.id,
     required this.nazwa,
-    this.kierunekId,
-    required this.urlIcs,
-    this.ostatniaAktualizacja,
+    required this.kierunekId,
+    required this.url,
+    this.rodzajStudiow = '',
+    this.rokAkademicki = '',
+    this.semestr = '',
   });
 
+  @override
+  List<Object?> get props => [
+        id,
+        nazwa,
+        kierunekId,
+        url,
+        rodzajStudiow,
+        rokAkademicki,
+        semestr,
+      ];
+
+  @override
+  String toString() =>
+      'Grupa(id: $id, nazwa: $nazwa, kierunekId: $kierunekId, semestr: $semestr)';
+
+  // Kopiowanie z możliwością nadpisania pól
   Grupa copyWith({
-    int? id,
+    String? id,
     String? nazwa,
-    int? kierunekId,
-    String? urlIcs,
-    DateTime? ostatniaAktualizacja,
+    String? kierunekId,
+    String? url,
+    String? rodzajStudiow,
+    String? rokAkademicki,
+    String? semestr,
   }) {
     return Grupa(
       id: id ?? this.id,
       nazwa: nazwa ?? this.nazwa,
       kierunekId: kierunekId ?? this.kierunekId,
-      urlIcs: urlIcs ?? this.urlIcs,
-      ostatniaAktualizacja: ostatniaAktualizacja ?? this.ostatniaAktualizacja,
+      url: url ?? this.url,
+      rodzajStudiow: rodzajStudiow ?? this.rodzajStudiow,
+      rokAkademicki: rokAkademicki ?? this.rokAkademicki,
+      semestr: semestr ?? this.semestr,
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        'nazwa': nazwa,
-        'kierunek_id': kierunekId,
-        'url_ics': urlIcs,
-      };
+  // Konwersja z JSON
+  factory Grupa.fromJson(Map<String, dynamic> json) {
+    return Grupa(
+      id: json['id'] as String,
+      nazwa: json['nazwa'] as String,
+      kierunekId: json['kierunek_id'] as String,
+      url: json['url'] as String? ?? '',
+      rodzajStudiow: json['rodzaj_studiow'] as String? ?? '',
+      rokAkademicki: json['rok_akademicki'] as String? ?? '',
+      semestr: json['semestr'] as String? ?? '',
+    );
+  }
 
-  factory Grupa.fromJson(Map<String, dynamic> json) => Grupa(
-        id: json['id'],
-        nazwa: json['nazwa'],
-        kierunekId: json['kierunek_id'],
-        urlIcs: json['url_ics'],
-        ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
-            ? DateTime.parse(json['ostatnia_aktualizacja'])
-            : null,
-      );
+  // Konwersja do JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'nazwa': nazwa,
+      'kierunek_id': kierunekId,
+      'url': url,
+      'rodzaj_studiow': rodzajStudiow,
+      'rok_akademicki': rokAkademicki,
+      'semestr': semestr,
+    };
+  }
+
+  // Walidacja danych grupy
+  bool get isValid =>
+      id.isNotEmpty && nazwa.isNotEmpty && kierunekId.isNotEmpty;
 }

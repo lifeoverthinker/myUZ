@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   supabase:
+  supabase_flutter:
   beautiful_soup_dart:
   http:
   html:
@@ -17,6 +18,8 @@ dependencies:
   intl:
   crypto:
   uuid:
+  equatable:
+  path:
 
 dev_dependencies:
   flutter_test:
@@ -25,4 +28,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-
