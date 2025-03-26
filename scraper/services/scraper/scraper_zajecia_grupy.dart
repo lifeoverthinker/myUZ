@@ -6,7 +6,7 @@ import 'package:my_uz/utils/logger.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
-Future<void> scrapeZajeciaGrupy(SupabaseService supabaseService) async {
+Future<void> scrapeZajeciaGrupy(SupabaseService supabaseService, {Map<String, dynamic>? checkpoint}) async {
   try {
     final grupy = await supabaseService.getAllGrupy();
     Logger.info('Rozpoczynam pobieranie zajęć dla ${grupy.length} grup');

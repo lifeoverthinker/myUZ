@@ -7,7 +7,7 @@ import 'package:my_uz/utils/logger.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
-Future<void> scrapeNauczyciel(List<Nauczyciel> nauczyciele, SupabaseService supabaseService) async {
+Future<void> scrapeNauczyciel(List<Nauczyciel> nauczyciele, SupabaseService supabaseService, {Map<String, dynamic>? checkpoint}) async {
   try {
     Logger.info('Rozpoczynam pobieranie zajęć dla ${nauczyciele.length} nauczycieli');
     final uuid = Uuid();
