@@ -6,6 +6,7 @@ import 'package:my_uz/utils/logger.dart';
 
 class ScraperZajeciaGrupy {
   final HttpService _httpService;
+  static const String _baseUrl = 'https://plan.uz.zgora.pl';
 
   ScraperZajeciaGrupy({HttpService? httpService})
       : _httpService = httpService ?? HttpService();
@@ -14,8 +15,10 @@ class ScraperZajeciaGrupy {
     Logger.info('Rozpoczynam pobieranie zajęć dla grupy: ${grupa.nazwa}');
 
     try {
-      Logger.debug('Pobieranie danych z: ${grupa.url}');
-      final response = await _httpService.getBody(grupa.url);
+      // Generujemy URL na podstawie ID grupy
+      final url = '$_baseUrl/grupy.php?ID=${grupa.id}';
+      Logger.debug('Pobieranie danych z: $url');
+      final response = await _httpService.getBody(url);
 
       if (response.isEmpty) {
         Logger.warning('Brak danych dla grupy: ${grupa.nazwa}');
@@ -43,19 +46,33 @@ class ScraperZajeciaGrupy {
           continue;
         }
 
-        final String generatedUid = 'someUid$i';
-        final int? nauczycielId = int.tryParse(tdElements[3].text.trim());
-        final int? grupaId = int.tryParse(grupa.id);
+        final przedmiot = tdElements[0].text.trim();
+        final rz = tdElements[1].text.trim();
+        final miejsce = tdElements[2].text.trim();
+        final nauczycielText = tdElements[3].text.trim();
+        final terminyText = tdElements[4].text.trim();
+
+        // Konwersja ID grupy na string przy generowaniu UID
+        final String generatedUid =
+            '${grupa.id.toString()}_${przedmiot}_${rz}_${miejsce}_$i'
+                .replaceAll(' ', '_');
+
+        // Parsowanie ID nauczyciela, jeśli jest liczbą
+        final int? nauczycielId = int.tryParse(nauczycielText);
+
+        // Domyślne daty
+        DateTime odDate = DateTime.now();
+        DateTime doDate = DateTime.now().add(Duration(hours: 1));
 
         final zajecie = Zajecia(
           uid: generatedUid,
-          grupaId: grupaId,
-          od: DateTime.now(),
-          do_: DateTime.now().add(Duration(hours: 1)),
-          przedmiot: tdElements[0].text.trim(),
-          rz: tdElements[1].text.trim(),
-          miejsce: tdElements[2].text.trim(),
-          terminy: 'poniedziałek 10:00-12:00',
+          grupaId: grupa.id,
+          od: odDate,
+          do_: doDate,
+          przedmiot: przedmiot,
+          rz: rz,
+          miejsce: miejsce,
+          terminy: terminyText,
           ostatniaAktualizacja: DateTime.now(),
           nauczycielId: nauczycielId,
         );
@@ -66,7 +83,8 @@ class ScraperZajeciaGrupy {
       Logger.info('Pobrano ${zajecia.length} zajęć dla grupy ${grupa.nazwa}');
       return zajecia;
     } catch (e, stackTrace) {
-      Logger.error('Błąd podczas pobierania zajęć dla grupy ${grupa.nazwa}', e, stackTrace);
+      Logger.error('Błąd podczas pobierania zajęć dla grupy ${grupa.nazwa}', e,
+          stackTrace);
       rethrow;
     }
   }

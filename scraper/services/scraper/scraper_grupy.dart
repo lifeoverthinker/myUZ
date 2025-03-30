@@ -25,7 +25,7 @@ class ScraperGrupy {
       }
 
       final document = html.parse(response);
-      final tableElements = document.querySelectorAll('table.tabela');
+      final tableElements = document.querySelectorAll('table.table');
 
       if (tableElements.isEmpty) {
         Logger.error(
@@ -36,8 +36,7 @@ class ScraperGrupy {
       final grupy = <Grupa>[];
       final rows = tableElements.first.querySelectorAll('tr');
 
-      // Pomijamy pierwszy wiersz (nagłówek)
-      for (int i = 1; i < rows.length; i++) {
+      for (int i = 0; i < rows.length; i++) {
         final row = rows[i];
         final cells = row.querySelectorAll('td');
 
@@ -47,56 +46,61 @@ class ScraperGrupy {
         }
 
         try {
-          // Pobieranie linku i nazwy grupy
           final linkElement = cells[0].querySelector('a');
           if (linkElement == null) {
-            Logger.debug('Brak linku do grupy w wierszu $i');
+            Logger.debug('Wiersz $i nie zawiera linku');
             continue;
           }
 
           final nazwa = linkElement.text.trim();
-          final href = linkElement.attributes['href'];
-
-          if (href == null || href.isEmpty) {
-            Logger.debug('Pusty link dla grupy: $nazwa');
-            continue;
-          }
-
-          // Wyodrębnianie ID grupy z URL
-          final idMatch = RegExp(r'id_grupa=(\d+)').firstMatch(href);
+          final href = linkElement.attributes['href'] ?? '';
+          final idMatch = RegExp(r'ID=(\d+)').firstMatch(href);
           final id = idMatch?.group(1) ?? '';
 
           if (id.isEmpty) {
-            Logger.warning('Nie można wyodrębnić ID grupy z URL: $href');
+            Logger.warning('Nie można wyodrębnić ID z URL: $href');
             continue;
           }
 
+          // Określanie rodzaju studiów na podstawie nazwy grupy
+          String rodzajStudiow = '';
+          if (nazwa.toLowerCase().contains('stacjonarne')) {
+            rodzajStudiow = 'stacjonarne';
+          } else if (nazwa.toLowerCase().contains('niestacjonarne')) {
+            rodzajStudiow = 'niestacjonarne';
+          }
+
+          // URL do strony planu zajęć grupy (HTML)
           final url = '$_baseUrl/$href';
 
-          // Pobieranie dodatkowych informacji (jeśli dostępne)
-          String rodzajStudiow = '';
-          String rokAkademicki = '';
-          String semestr = '';
+          // URL do pliku ICS (kalendarz Google)
+          final urlIcs = '$_baseUrl/grupy_ics.php?ID=$id&KIND=GG';
 
-          if (cells.length > 1) rodzajStudiow = cells[1].text.trim();
-          if (cells.length > 2) rokAkademicki = cells[2].text.trim();
-          if (cells.length > 3) semestr = cells[3].text.trim();
+          // Pobierz semestr ze strony planu zajęć
+          final semestr = await _pobierzSemestrZPlanZajec(url);
 
           final grupa = Grupa(
-            id: id,
+            id: int.parse(id),
             nazwa: nazwa,
-            kierunekId: kierunek.id,
-            url: url,
+            kierunekId: int.parse(kierunek.id),
+            urlIcs: urlIcs,
+            ostatniaAktualizacja: DateTime.now(),
             rodzajStudiow: rodzajStudiow,
-            rokAkademicki: rokAkademicki,
+            rokAkademicki: '',
             semestr: semestr,
           );
 
+          final errors = validateGrupaData(grupa);
+          if (errors.isNotEmpty) {
+            Logger.warning('Nieprawidłowe dane grupy: ${errors.join(", ")}');
+            continue;
+          }
+
           grupy.add(grupa);
-          Logger.debug('Znaleziono grupę: $nazwa, semestr: $semestr');
+          Logger.debug(
+              'Dodano grupę: ${grupa.id} - ${grupa.nazwa}, semestr: ${grupa.semestr}');
         } catch (e) {
           Logger.warning('Błąd podczas przetwarzania wiersza $i: $e');
-          // Kontynuuj z następnym wierszem
         }
       }
 
@@ -112,6 +116,36 @@ class ScraperGrupy {
     }
   }
 
+  // Metoda do pobierania informacji o semestrze z nagłówka na stronie planu zajęć
+  Future<String> _pobierzSemestrZPlanZajec(String url) async {
+    try {
+      final response = await _httpService.getBody(url);
+      if (response.isEmpty) {
+        Logger.warning(
+            'Otrzymano pustą odpowiedź przy próbie pobrania strony planu zajęć: $url');
+        return '';
+      }
+
+      final document = html.parse(response);
+      final h3Elements = document.querySelectorAll('h3');
+
+      for (final h3 in h3Elements) {
+        final tekst = h3.text.toLowerCase();
+        if (tekst.contains('semestr letni')) {
+          return 'letni';
+        } else if (tekst.contains('semestr zimowy')) {
+          return 'zimowy';
+        }
+      }
+
+      Logger.debug('Nie znaleziono informacji o semestrze na stronie: $url');
+      return '';
+    } catch (e) {
+      Logger.warning('Błąd podczas pobierania informacji o semestrze: $e');
+      return '';
+    }
+  }
+
   // Metoda pomocnicza do walidacji danych grupy
   List<String> validateGrupaData(Grupa grupa) {
     final errors = <String>[];
@@ -120,18 +154,18 @@ class ScraperGrupy {
       errors.add('Brak nazwy grupy');
     }
 
-    if (grupa.id.isEmpty) {
-      errors.add('Brak ID grupy');
+    if (grupa.id <= 0) {
+      errors.add('Nieprawidłowe ID grupy');
     }
 
-    if (grupa.kierunekId.isEmpty) {
-      errors.add('Brak ID kierunku');
+    if (grupa.kierunekId <= 0) {
+      errors.add('Nieprawidłowe ID kierunku');
     }
 
-    if (grupa.url.isEmpty) {
+    if (grupa.urlIcs.isEmpty) {
       errors.add('Brak URL grupy');
-    } else if (!grupa.url.startsWith(_baseUrl)) {
-      errors.add('Nieprawidłowy format URL: ${grupa.url}');
+    } else if (!grupa.urlIcs.startsWith(_baseUrl)) {
+      errors.add('Nieprawidłowy format URL: ${grupa.urlIcs}');
     }
 
     return errors;
