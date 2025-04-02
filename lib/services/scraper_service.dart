@@ -9,26 +9,31 @@ class ScraperService {
 
   Future<void> scrapujPlany() async {
     try {
-      final grupy = await _supabase.pobierzGrupy();
+      _logger.i('Pobieranie nauczycieli...');
+      final nauczyciele = await _supabase.pobierzNauczycieli();
+      _logger.i('Pobrano ${nauczyciele.length} nauczycieli z planami');
 
-      await Future.wait(grupy.map((grupa) async {
-        final icsUrl = grupa.urlIcs;
-        final response = await http.get(Uri.parse(icsUrl));
+      for (var nauczyciel in nauczyciele) {
+        if (nauczyciel.urlPlan?.isEmpty ?? true) continue;
 
-        if (response.statusCode == 200) {
-          final zajecia = IcsParser.parsujZajecia(
-            response.body,
-            grupaId: grupa.id,
-          );
-          await _supabase.zapiszZajecia(zajecia);
-          _logger.i('Zapisano zajęcia dla grupy ${grupa.nazwa}');
-        } else {
-          _logger.e('Błąd pobierania ICS dla ${grupa.nazwa} (${response.statusCode})');
+        try {
+          _logger.i('Pobieram plan dla: ${nauczyciel.nazwa}');
+          final response = await http.get(Uri.parse(nauczyciel.urlPlan!));
+
+          if (response.statusCode == 200) {
+            final zajecia = IcsParser.parsujZajecia(response.body);
+            _logger.i('Zapisuję ${zajecia.length} zajęć dla ${nauczyciel.nazwa}');
+            await _supabase.zapiszZajecia(zajecia);
+          } else {
+            _logger.w('Nie udało się pobrać planu dla ${nauczyciel.nazwa}. Status: ${response.statusCode}');
+          }
+        } catch (e) {
+          _logger.e('Błąd przy przetwarzaniu nauczyciela ${nauczyciel.nazwa}', error: e);
         }
-      }));
-
+      }
     } catch (e) {
-      _logger.e('❗ Krytyczny błąd scrapowania', error: e);
+      _logger.e('Błąd scrapowania planów nauczycieli', error: e);
+      rethrow; // Używamy rethrow zamiast throw e
     }
   }
 }

@@ -6,9 +6,10 @@ void main() async {
   final scraper = ScraperService();
 
   try {
+    logger.i('🚀 Rozpoczęcie scrapowania planów zajęć');
     await scraper.scrapujPlany();
-    logger.i('✅ Scrapowanie zakończone pomyślnie');
+    logger.i('🎉 Pomyślnie zakończono scrapowanie');
   } catch (e) {
-    logger.e('❌ Błąd podczas scrapowania', error: e);
+    logger.e('💥 Krytyczny błąd podczas scrapowania', error: e);
   }
 }

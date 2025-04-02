@@ -4,23 +4,22 @@ description: Aplikacja do zarządzania planem zajęć UZ
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'  # Zaktualizowano do Flutter 3.x
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  http:   # Do pobierania plików ICS
-  logger: # Do logowania
-  supabase_flutter:
+  http: ^1.1.0 # Do pobierania plików ICS
+  logger: ^2.0.0 # Do logowania
+  supabase_flutter: ^2.0.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints:   # Najnowsze linty
+  flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true
 
-# 🔴 Dodaj to dla skryptów w bin/
 executables:
-  scraper: scraper  # Umożliwia uruchomienie przez `dart run scraper`
+  scraper: scraper

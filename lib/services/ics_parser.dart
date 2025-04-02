@@ -1,73 +1,75 @@
-import '../models/zajecia_model.dart';
+import 'package:my_uz/models/zajecia_model.dart';
 
 class IcsParser {
-  /// Główna metoda parsująca plik ICS
-  static List<Zajecia> parsujZajecia(String icsContent, {int? grupaId}) {
-    final List<Zajecia> listaZajec = [];
-    final linie = icsContent.split('\n'); // Dzielimy plik na linie
-    Map<String, String> aktualneZajecia = {}; // Tymczasowe przechowywanie danych
+  static List<Zajecia> parsujZajecia(String icsContent, {int? nauczycielId}) {
+    final List<Zajecia> zajecia = [];
+    final lines = icsContent.split('\n');
 
-    for (var linia in linie) {
-      linia = linia.trim(); // Usuwamy białe znaki
+    String? uid;
+    DateTime? start;
+    DateTime? end;
+    String? summary;
+    String? location;
+    String? description;
 
-      // Rozpoczęcie nowych zajęć
-      if (linia == 'BEGIN:VEVENT') {
-        aktualneZajecia = {};
+    bool inEvent = false;
+
+    for (var line in lines) {
+      line = line.trim();
+
+      if (line == 'BEGIN:VEVENT') {
+        inEvent = true;
+        uid = null;
+        start = null;
+        end = null;
+        summary = null;
+        location = null;
+        description = null;
+      } else if (line == 'END:VEVENT') {
+        inEvent = false;
+
+        if (uid != null && start != null && end != null && summary != null) {
+          zajecia.add(Zajecia(
+            uid: uid,
+            od: start,
+            do_: end,
+            przedmiot: summary,
+            miejsce: location,
+            terminy: description,
+            nauczycielId: nauczycielId,
+          ));
+        }
       }
-      // Zakończenie zajęć - zapisujemy do listy
-      else if (linia == 'END:VEVENT') {
-        final zajecia = _stworzObiektZajec(aktualneZajecia, grupaId);
-        listaZajec.add(zajecia);
-      }
-      // Parsowanie poszczególnych pól
-      else if (aktualneZajecia.isNotEmpty) {
-        final podzial = linia.split(':');
-        if (podzial.length > 1) {
-          final klucz = podzial[0];
-          final wartosc = podzial.sublist(1).join(':');
-          aktualneZajecia[klucz] = wartosc;
+
+      if (inEvent) {
+        if (line.startsWith('UID:')) {
+          uid = line.substring(4);
+        } else if (line.startsWith('DTSTART:')) {
+          start = _parseIcsDate(line.substring(8));
+        } else if (line.startsWith('DTEND:')) {
+          end = _parseIcsDate(line.substring(6));
+        } else if (line.startsWith('SUMMARY:')) {
+          summary = line.substring(8);
+        } else if (line.startsWith('LOCATION:')) {
+          location = line.substring(9);
+        } else if (line.startsWith('DESCRIPTION:')) {
+          description = line.substring(12);
         }
       }
     }
 
-    return listaZajec;
+    return zajecia;
   }
 
-  /// Tworzy obiekt Zajecia na podstawie mapy danych
-  static Zajecia _stworzObiektZajec(Map<String, String> dane, int? grupaId) {
-    // Parsowanie nazwy przedmiotu i nauczyciela
-    final podzialNazwy = (dane['SUMMARY'] ?? 'Brak nazwy').split(':');
-    final przedmiot = podzialNazwy.first.trim();
-    final nauczyciel = podzialNazwy.length > 1 ? podzialNazwy.last.trim() : 'Brak danych';
+  static DateTime _parseIcsDate(String icsDate) {
+    // Format: YYYYMMDDTHHMMSSZ
+    final year = int.parse(icsDate.substring(0, 4));
+    final month = int.parse(icsDate.substring(4, 6));
+    final day = int.parse(icsDate.substring(6, 8));
+    final hour = int.parse(icsDate.substring(9, 11));
+    final minute = int.parse(icsDate.substring(11, 13));
+    final second = int.parse(icsDate.substring(13, 15));
 
-    return Zajecia(
-      uid: dane['UID'] ?? 'brak_uid_${DateTime.now().millisecondsSinceEpoch}',
-      grupaId: grupaId,
-      od: _parsujDate(dane['DTSTART'] ?? ''),
-      do_: _parsujDate(dane['DTEND'] ?? ''),
-      przedmiot: przedmiot,
-      rz: dane['CATEGORIES'] ?? 'Ć', // Domyślnie ćwiczenia
-      miejsce: dane['LOCATION'] ?? 'Brak sali',
-      nauczyciel: nauczyciel,
-    );
-  }
-
-  /// Konwertuje datę z formatu ICS na DateTime
-  static DateTime _parsujDate(String dataICS) {
-    try {
-      if (dataICS.length >= 15) {
-        // Format: 20250402T104000 -> 2025-04-02 10:40:00
-        return DateTime.parse(
-            dataICS
-                .replaceFirstMapped(
-                RegExp(r'^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$'),
-                    (match) => '${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}'
-            )
-        );
-      }
-      return DateTime.now(); // Domyślna data jeśli parsowanie się nie uda
-    } catch (e) {
-      return DateTime.now(); // Domyślna data w przypadku błędu
-    }
+    return DateTime.utc(year, month, day, hour, minute, second);
   }
 }

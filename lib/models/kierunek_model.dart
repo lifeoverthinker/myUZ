@@ -16,12 +16,15 @@ class Kierunek {
       id: json['id'],
       nazwa: json['nazwa'],
       url: json['url'],
-      ostatniaAktualizacja: DateTime.parse(json['ostatnia_aktualizacja']),
+      ostatniaAktualizacja: json['ostatnia_aktualizacja'] != null
+          ? DateTime.parse(json['ostatnia_aktualizacja'])
+          : null,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
+      'id': id,
       'nazwa': nazwa,
       'url': url,
     };
