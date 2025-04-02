@@ -1,7 +1,6 @@
-class Zajecia {
+class PlanNauczyciela {
   final String uid;
-  final int? grupaId;
-  final int? nauczycielId;
+  final int nauczycielId;
   final DateTime od;
   final DateTime do_;
   final String przedmiot;
@@ -10,10 +9,9 @@ class Zajecia {
   final String? terminy;
   final DateTime? ostatniaAktualizacja;
 
-  Zajecia({
+  PlanNauczyciela({
     required this.uid,
-    this.grupaId,
-    this.nauczycielId,
+    required this.nauczycielId,
     required this.od,
     required this.do_,
     required this.przedmiot,
@@ -25,7 +23,6 @@ class Zajecia {
 
   Map<String, dynamic> toJson() => {
     'uid': uid,
-    'grupa_id': grupaId,
     'nauczyciel_id': nauczycielId,
     'od': od.toIso8601String(),
     'do': do_.toIso8601String(),

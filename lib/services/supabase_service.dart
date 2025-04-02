@@ -1,84 +1,61 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:my_uz/models/nauczyciel_model.dart';
 import 'package:my_uz/models/kierunek_model.dart';
 import 'package:my_uz/models/grupa_model.dart';
 import 'package:my_uz/models/zajecia_model.dart';
+import 'package:my_uz/models/nauczyciel_model.dart';
 import 'package:logger/logger.dart';
 
 class SupabaseService {
-  final _supabase = Supabase.instance.client;
   final _logger = Logger();
+  final _supabase = Supabase.instance.client;
 
-  // Metody do nauczycieli
-  Future<List<Nauczyciel>> pobierzNauczycieli() async {
-    _logger.i('Pobieranie nauczycieli z bazy...');
-    final response = await _supabase.from('nauczyciele').select();
+  Future<void> wstawKierunki(List<Kierunek> kierunki) async {
+    _logger.i('Zapisywanie ${kierunki.length} kierunków');
 
-    _logger.d('Pobrano dane: ${response.length} nauczycieli');
-    return (response as List).map((json) => Nauczyciel.fromJson(json)).toList();
-  }
-
-  Future<Nauczyciel> dodajNauczyciela(Nauczyciel nauczyciel) async {
-    _logger.i('Dodawanie nauczyciela: ${nauczyciel.nazwa}');
-    final response = await _supabase
-        .from('nauczyciele')
-        .insert(nauczyciel.toJson())
-        .select()
-        .single();
-
-    _logger.d('Dodano nauczyciela z ID: ${response['id']}');
-    return Nauczyciel.fromJson(response);
-  }
-
-  // Metoda do zajęć
-  Future<void> zapiszZajecia(List<Zajecia> zajecia) async {
-    if (zajecia.isEmpty) {
-      _logger.w('Próba zapisu pustej listy zajęć');
-      return;
+    for (var batch in _podzielNaBatche(kierunki, 100)) {
+      await _supabase
+          .from('kierunki')
+          .upsert(batch.map((k) => k.toJson()).toList(), onConflict: 'id');
     }
-
-    _logger.i('Zapisywanie ${zajecia.length} zajęć do bazy...');
-
-    // Poprawka: usunięto niepotrzebny operator ?.
-    final dataToInsert = zajecia.map((z) => z.toJson()).toList();
-
-    await _supabase.from('zajecia').upsert(dataToInsert, onConflict: 'uid');
-
-    _logger.i('Zapisano zajęcia do bazy');
   }
 
-  // Metoda do sprawdzania liczby zajęć (dla testów)
-  Future<int> liczbaZajecWBazie() async {
-    _logger.i('Sprawdzanie liczby zajęć w bazie...');
-    final response = await _supabase.from('zajecia').select('uid');
+  Future<void> wstawGrupy(List<Grupa> grupy) async {
+    _logger.i('Zapisywanie ${grupy.length} grup');
 
-    _logger.d('Liczba zajęć w bazie: ${response.length}');
-    return response.length;
-  }
-
-  // Kierunki
-  Future<List<Kierunek>> pobierzKierunki() async {
-    _logger.i('Pobieranie kierunków z bazy...');
-    final response = await _supabase.from('kierunki').select();
-
-    _logger.d('Pobrano ${response.length} kierunków');
-    return (response as List).map((json) => Kierunek.fromJson(json)).toList();
-  }
-
-  // Grupy
-  Future<List<Grupa>> pobierzGrupy({int? kierunekId}) async {
-    // Poprawka: użyto interpolacji zamiast operatora +
-    _logger.i(
-        'Pobieranie grup${kierunekId != null ? " dla kierunku $kierunekId" : ""}');
-    var query = _supabase.from('grupy').select();
-
-    if (kierunekId != null) {
-      query = query.eq('kierunek_id', kierunekId);
+    for (var batch in _podzielNaBatche(grupy, 100)) {
+      await _supabase
+          .from('grupy')
+          .upsert(batch.map((g) => g.toJson()).toList(), onConflict: 'id');
     }
+  }
 
-    final response = await query;
+  Future<void> wstawZajecia(List<Zajecia> zajecia) async {
+    _logger.i('Zapisywanie ${zajecia.length} zajęć');
 
-    _logger.d('Pobrano ${response.length} grup');
-    return (response as List).map((json) => Grupa.fromJson(json)).toList();
+    for (var batch in _podzielNaBatche(zajecia, 100)) {
+      await _supabase
+          .from('zajecia')
+          .upsert(batch.map((z) => z.toJson()).toList(), onConflict: 'uid');
+    }
+  }
+
+  Future<void> wstawNauczycieli(List<Nauczyciel> nauczyciele) async {
+    _logger.i('Zapisywanie ${nauczyciele.length} nauczycieli');
+
+    for (var batch in _podzielNaBatche(nauczyciele, 100)) {
+      await _supabase
+          .from('nauczyciele')
+          .upsert(batch.map((n) => n.toJson()).toList(), onConflict: 'id');
+    }
+  }
+
+  List<List<T>> _podzielNaBatche<T>(List<T> items, int rozmiarBatcha) {
+    List<List<T>> batches = [];
+    for (var i = 0; i < items.length; i += rozmiarBatcha) {
+      var end =
+          (i + rozmiarBatcha < items.length) ? i + rozmiarBatcha : items.length;
+      batches.add(items.sublist(i, end));
+    }
+    return batches;
   }
 }

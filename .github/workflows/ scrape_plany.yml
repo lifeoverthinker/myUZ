@@ -2,7 +2,7 @@ name: Scrapowanie planów zajęć
 
 on:
   schedule:
-    - cron: '0 3 * * *' # Uruchamiaj codziennie o 3:00 UTC
+      - cron: '0 3 * * *' # Uruchamiaj codziennie o 3:00 UTC
   workflow_dispatch: # Ręczne uruchomienie
 
 jobs:
@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
     steps:
@@ -22,7 +21,14 @@ jobs:
           channel: 'stable'
 
       - name: Instalacja zależności
-        run: flutter pub get
+        run: |
+          flutter pub add http
+          flutter pub add html
+          flutter pub add icalendar_parser
+          flutter pub add logger
+          flutter pub add supabase_flutter
+          flutter pub add uuid
+          flutter pub get
 
       - name: Uruchomienie scrapowania
-        run: dart run bin/scraper.dart
+        run: dart run lib/bin/scraper.dart

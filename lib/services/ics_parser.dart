@@ -1,85 +1,86 @@
+import 'package:icalendar_parser/icalendar_parser.dart';
 import 'package:my_uz/models/zajecia_model.dart';
+import 'package:uuid/uuid.dart';
 import 'package:logger/logger.dart';
 
 class IcsParser {
-  static final _logger = Logger();
+  final _logger = Logger();
+  final _uuid = const Uuid();
 
-  static List<Zajecia> parsujZajecia(String icsContent, {int? nauczycielId}) {
-    _logger.i('Rozpoczęcie parsowania pliku ICS...');
-    final List<Zajecia> zajecia = [];
-    final lines = icsContent.split('\n');
+  List<Zajecia> parsujIcs(String icsContent,
+      {int? grupaId, int? nauczycielId}) {
+    if (grupaId == null && nauczycielId == null) {
+      throw ArgumentError('Musisz podać albo grupaId albo nauczycielId');
+    }
 
-    String? uid;
-    DateTime? start;
-    DateTime? end;
-    String? summary;
-    String? location;
-    String? description;
+    try {
+      final iCalendar = ICalendar.fromString(icsContent);
+      final events = iCalendar.data;
+      final zajecia = <Zajecia>[];
 
-    bool inEvent = false;
+      for (final event in events) {
+        try {
+          // Wyciągamy potrzebne dane
+          final uid = event['uid'] ?? _uuid.v4();
+          final summary = event['summary']?.toString() ?? '';
+          // Usunięto linię z description - była nieużywana
+          final location = event['location']?.toString() ?? '';
 
-    for (var line in lines) {
-      line = line.trim();
+          // Parsowanie dat - bezpieczne konwersje z obsługą null
+          DateTime? startDt = event['dtstart']?['dt'];
+          DateTime? endDt = event['dtend']?['dt'];
 
-      if (line == 'BEGIN:VEVENT') {
-        inEvent = true;
-        uid = null;
-        start = null;
-        end = null;
-        summary = null;
-        location = null;
-        description = null;
-      } else if (line == 'END:VEVENT') {
-        inEvent = false;
+          // Sprawdzenie czy daty są poprawne
+          if (startDt == null || endDt == null) {
+            _logger.w('Pominięto wydarzenie: brak wymaganych dat');
+            continue;
+          }
 
-        if (uid != null && start != null && end != null && summary != null) {
+          // Teraz możemy bezpiecznie użyć tych dat, bo już sprawdziliśmy null
+          final terminy = _formatujTermin(startDt, endDt);
+
           zajecia.add(Zajecia(
             uid: uid,
-            od: start,
-            do_: end,
+            grupaId: grupaId,
+            nauczycielId: nauczycielId,
+            od: startDt,
+            do_: endDt,
             przedmiot: summary,
             miejsce: location,
-            terminy: description,
-            nauczycielId: nauczycielId,
+            terminy: terminy,
           ));
+        } catch (e) {
+          _logger.e('Błąd podczas parsowania wydarzenia ICS: $e');
         }
       }
 
-      if (inEvent) {
-        if (line.startsWith('UID:')) {
-          uid = line.substring(4);
-        } else if (line.startsWith('DTSTART:')) {
-          start = _parseIcsDate(line.substring(8));
-        } else if (line.startsWith('DTEND:')) {
-          end = _parseIcsDate(line.substring(6));
-        } else if (line.startsWith('SUMMARY:')) {
-          summary = line.substring(8);
-        } else if (line.startsWith('LOCATION:')) {
-          location = line.substring(9);
-        } else if (line.startsWith('DESCRIPTION:')) {
-          description = line.substring(12);
-        }
-      }
+      return zajecia;
+    } catch (e) {
+      _logger.e('Błąd podczas parsowania pliku ICS: $e');
+      return [];
     }
-
-    _logger.i('Zakończenie parsowania. Znaleziono ${zajecia.length} zajęć');
-    return zajecia;
   }
 
-  static DateTime _parseIcsDate(String icsDate) {
-    try {
-      // Format: YYYYMMDDTHHMMSSZ
-      final year = int.parse(icsDate.substring(0, 4));
-      final month = int.parse(icsDate.substring(4, 6));
-      final day = int.parse(icsDate.substring(6, 8));
-      final hour = int.parse(icsDate.substring(9, 11));
-      final minute = int.parse(icsDate.substring(11, 13));
-      final second = int.parse(icsDate.substring(13, 15));
+  String _formatujTermin(DateTime start, DateTime koniec) {
+    final dzien = _getDzienTygodnia(start);
+    final godzinaStart =
+        '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}';
+    final godzinaKoniec =
+        '${koniec.hour.toString().padLeft(2, '0')}:${koniec.minute.toString().padLeft(2, '0')}';
 
-      return DateTime.utc(year, month, day, hour, minute, second);
-    } catch (e) {
-      Logger().e('Błąd parsowania daty: $icsDate', error: e);
-      return DateTime.now(); // Awaryjnie zwracamy aktualny czas
-    }
+    return '$dzien $godzinaStart-$godzinaKoniec';
+  }
+
+  String _getDzienTygodnia(DateTime data) {
+    final dni = [
+      'niedziela',
+      'poniedziałek',
+      'wtorek',
+      'środa',
+      'czwartek',
+      'piątek',
+      'sobota'
+    ];
+    return dni[data.weekday % 7];
   }
 }
