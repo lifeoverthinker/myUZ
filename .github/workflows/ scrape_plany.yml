@@ -2,12 +2,13 @@ name: Scrapowanie planów zajęć
 
 on:
   schedule:
-      - cron: '0 3 * * *' # Uruchamiaj codziennie o 3:00 UTC
+    - cron: '0 3 * * *' # Uruchamiaj codziennie o 3:00 UTC
   workflow_dispatch: # Ręczne uruchomienie
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 30 # Dodano limit czasu
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -26,9 +27,15 @@ jobs:
           flutter pub add html
           flutter pub add icalendar_parser
           flutter pub add logger
-          flutter pub add supabase_flutter
+          flutter pub add supabase
           flutter pub add uuid
           flutter pub get
+
+      - name: Sprawdź środowisko
+        run: |
+          echo "Katalog bin:"
+          ls -la lib/bin/
+          echo "Zmienne środowiskowe są ustawione: ${{ env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != '' }}"
 
       - name: Uruchomienie scrapowania
         run: dart run lib/bin/scraper.dart

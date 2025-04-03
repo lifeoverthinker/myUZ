@@ -11,17 +11,7 @@ import 'package:my_uz/services/ics_parser.dart';
 
 class ScraperService {
   // Logger do zapisywania informacji
-  final _logger = Logger(
-    printer: PrettyPrinter(
-      methodCount: 0,
-      errorMethodCount: 5,
-      lineLength: 80,
-      colors: true,
-      printEmojis: true,
-      dateTimeFormat: DateTimeFormat.onlyTimeAndSinceStart,
-    ),
-    level: Level.trace, // Użyto trace zamiast verbose (deprecated)
-  );
+  late final Logger _logger;
 
   // Klient HTTP do pobierania stron
   final _klient = http.Client();
@@ -33,7 +23,7 @@ class ScraperService {
   final _icsParser = IcsParser();
 
   // Maksymalna liczba równoległych zadań
-  final int _maxRownoleglychZadan = 5;
+  final int _maxRownoleglychZadan;
 
   // Timeout dla zapytań HTTP
   final Duration _timeout = const Duration(seconds: 20);
@@ -41,9 +31,29 @@ class ScraperService {
   // Flaga przerwania procesu
   bool _czyPrzerwano = false;
 
-  // Konstruktor przyjmujący klienta Supabase
-  ScraperService({required SupabaseClient supabaseClient})
-      : _supabase = supabaseClient;
+// Zmodyfikowany konstruktor
+  ScraperService({
+    required SupabaseClient supabaseClient,
+    Logger? logger,
+    int maxRownoleglychZadan = 5,
+  })  : _supabase = supabaseClient,
+        _maxRownoleglychZadan = maxRownoleglychZadan {
+    // Użyj przekazanego loggera lub utwórz nowy
+    _logger = logger ??
+        Logger(
+          printer: PrettyPrinter(
+            methodCount: 0,
+            errorMethodCount: 5,
+            lineLength: 80,
+            colors: true,
+            printEmojis: true,
+            dateTimeFormat: DateTimeFormat.onlyTimeAndSinceStart,
+          ),
+          level: Level.trace,
+        );
+
+    _logger.i('ScraperService zainicjalizowany z ${_maxRownoleglychZadan} równoległymi zadaniami');
+  }
 
   /// Metoda do przerwania scrapowania
   void przerwij() {
