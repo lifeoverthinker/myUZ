@@ -11,7 +11,17 @@ import 'package:my_uz/services/ics_parser.dart';
 
 class ScraperService {
   // Logger do zapisywania informacji
-  final _logger = Logger();
+  final _logger = Logger(
+    printer: PrettyPrinter(
+      methodCount: 0,
+      errorMethodCount: 5,
+      lineLength: 80,
+      colors: true,
+      printEmojis: true,
+      dateTimeFormat: DateTimeFormat.onlyTimeAndSinceStart,
+    ),
+    level: Level.trace, // Użyto trace zamiast verbose (deprecated)
+  );
 
   // Klient HTTP do pobierania stron
   final _klient = http.Client();
@@ -23,35 +33,85 @@ class ScraperService {
   final _icsParser = IcsParser();
 
   // Maksymalna liczba równoległych zadań
-  final int _maxRownoleglychZadan = 10;
+  final int _maxRownoleglychZadan = 5;
+
+  // Timeout dla zapytań HTTP
+  final Duration _timeout = const Duration(seconds: 20);
+
+  // Flaga przerwania procesu
+  bool _czyPrzerwano = false;
 
   // Konstruktor przyjmujący klienta Supabase
   ScraperService({required SupabaseClient supabaseClient})
       : _supabase = supabaseClient;
 
+  /// Metoda do przerwania scrapowania
+  void przerwij() {
+    _czyPrzerwano = true;
+    _logger.w('⚠️ Żądanie przerwania scrapowania...');
+  }
+
+  /// Główna metoda scrapowania z limitem czasu
+  Future<void> uruchomScrapowanieZLimitem(Duration limit) async {
+    return uruchomScrapowanie().timeout(limit, onTimeout: () {
+      _logger.w('⏱️ Przekroczony czas całego procesu');
+      przerwij();
+    });
+  }
+
   /// Główna metoda scrapowania
   Future<void> uruchomScrapowanie() async {
-    _logger.i('Rozpoczynam scrapowanie planów zajęć UZ');
+    _logger.i('🚀 Rozpoczynam scrapowanie planów zajęć UZ');
 
     try {
+      // Sprawdzenie połączenia z Supabase
+      _logger.i('🔍 Sprawdzam połączenie z bazą danych...');
+      await _supabase.from('kierunki').select('id').limit(1);
+      _logger.i('✅ Połączenie z Supabase działa poprawnie');
+
       // 1. Pobieranie i zapisywanie kierunków
+      _logger.i('📚 Pobieram listę kierunków...');
       final kierunki = await _pobierzKierunki();
+
+      if (_czyPrzerwano) {
+        _logger.w('🛑 Scrapowanie przerwane podczas pobierania kierunków');
+        return;
+      }
+
+      _logger.i('💾 Zapisuję ${kierunki.length} kierunków do bazy...');
       await _zapiszKierunki(kierunki);
-      _logger.i('Pobrano i zapisano ${kierunki.length} kierunków');
+      _logger.i('✅ Zapisano ${kierunki.length} kierunków');
 
       // 2. Pobieranie i zapisywanie grup
+      _logger.i('👥 Pobieram grupy dla ${kierunki.length} kierunków...');
       final grupy = await _pobierzGrupy(kierunki);
+
+      if (_czyPrzerwano) {
+        _logger.w('🛑 Scrapowanie przerwane podczas pobierania grup');
+        return;
+      }
+
+      _logger.i('💾 Zapisuję ${grupy.length} grup do bazy...');
       await _zapiszGrupy(grupy);
-      _logger.i('Pobrano i zapisano ${grupy.length} grup');
+      _logger.i('✅ Zapisano ${grupy.length} grup');
 
       // 3. Pobieranie i zapisywanie zajęć
+      _logger.i('📅 Pobieram zajęcia dla ${grupy.length} grup...');
       final zajecia = await _pobierzZajecia(grupy);
-      await _zapiszZajecia(zajecia);
-      _logger.i('Pobrano i zapisano ${zajecia.length} zajęć');
 
-      _logger.i('Zakończono scrapowanie planów zajęć');
+      if (_czyPrzerwano) {
+        _logger.w('🛑 Scrapowanie przerwane podczas pobierania zajęć');
+        return;
+      }
+
+      _logger.i('💾 Zapisuję ${zajecia.length} zajęć do bazy...');
+      await _zapiszZajecia(zajecia);
+      _logger.i('✅ Zapisano ${zajecia.length} zajęć');
+
+      _logger.i('🎉 Zakończono scrapowanie planów zajęć');
     } catch (e, stack) {
-      _logger.e('Błąd podczas scrapowania: $e', error: e, stackTrace: stack);
+      _logger.e('💥 Błąd podczas scrapowania: $e\nTyp błędu: ${e.runtimeType}',
+          error: e, stackTrace: stack);
       rethrow;
     } finally {
       _klient.close();
@@ -60,39 +120,56 @@ class ScraperService {
 
   /// Pobiera listę kierunków ze strony
   Future<List<Kierunek>> _pobierzKierunki() async {
-    _logger.i('Pobieram listę kierunków');
+    _logger.i('🔍 Pobieram listę kierunków');
 
-    final response = await _klient.get(Uri.parse(Constants.listaKierunkowUrl));
-    final dokument = parse(response.body);
+    try {
+      final response = await _klient
+          .get(Uri.parse(Constants.listaKierunkowUrl))
+          .timeout(_timeout, onTimeout: () {
+        throw TimeoutException('Timeout podczas pobierania listy kierunków');
+      });
 
-    final kierunki = <Kierunek>[];
-    final wydzialy = dokument.querySelectorAll('div.panel');
+      _logger.d('📝 Parsowanie dokumentu HTML');
+      final dokument = parse(response.body);
 
-    for (final wydzial in wydzialy) {
-      final kierunkiElementy = wydzial.querySelectorAll('li.list-group-item a');
-      for (final kierunekElement in kierunkiElementy) {
-        final nazwa = kierunekElement.text.trim();
-        final href = kierunekElement.attributes['href'] ?? '';
+      final kierunki = <Kierunek>[];
+      final wydzialy = dokument.querySelectorAll('div.panel');
+      _logger.d('🔍 Znaleziono ${wydzialy.length} wydziałów');
 
-        // Wyciągamy ID kierunku z URL
-        final idMatch = RegExp(r'ID=(\d+)').firstMatch(href);
-        if (idMatch != null && idMatch.groupCount >= 1) {
-          final id = int.parse(idMatch.group(1)!);
-          kierunki.add(Kierunek(
-            id: id,
-            nazwa: nazwa,
-            url: '${Constants.listaGrupUrl}?ID=$id',
-          ));
+      for (final wydzial in wydzialy) {
+        final kierunkiElementy =
+            wydzial.querySelectorAll('li.list-group-item a');
+        for (final kierunekElement in kierunkiElementy) {
+          final nazwa = kierunekElement.text.trim();
+          final href = kierunekElement.attributes['href'] ?? '';
+
+          // Wyciągamy ID kierunku z URL
+          final idMatch = RegExp(r'ID=(\d+)').firstMatch(href);
+          if (idMatch != null && idMatch.groupCount >= 1) {
+            final id = int.parse(idMatch.group(1)!);
+            kierunki.add(Kierunek(
+              id: id,
+              nazwa: nazwa,
+              url: '${Constants.listaGrupUrl}?ID=$id',
+            ));
+          }
         }
       }
-    }
 
-    return kierunki;
+      _logger.i('✅ Pobrano ${kierunki.length} kierunków');
+      return kierunki;
+    } catch (e, stack) {
+      _logger.e(
+          '❌ Błąd podczas pobierania kierunków: $e\nTyp błędu: ${e.runtimeType}',
+          error: e,
+          stackTrace: stack);
+      rethrow;
+    }
   }
 
   /// Pobiera grupy dla listy kierunków (wielowątkowo)
   Future<List<Grupa>> _pobierzGrupy(List<Kierunek> kierunki) async {
-    _logger.i('Pobieram grupy dla ${kierunki.length} kierunków');
+    _logger.i('👥 Pobieram grupy dla ${kierunki.length} kierunków');
 
     final wszystkieGrupy = <Grupa>[];
     final futures = <Future<List<Grupa>>>[];
@@ -100,28 +177,44 @@ class ScraperService {
 
     // Tworzymy zadania do wykonania
     for (final kierunek in kierunki) {
+      if (_czyPrzerwano) break;
       futures.add(pula.wykonaj(() => _pobierzGrupyDlaKierunku(kierunek)));
     }
 
     // Czekamy na wyniki i łączymy je
     int ukonczone = 0;
     for (final future in futures) {
-      final grupy = await future;
-      wszystkieGrupy.addAll(grupy);
+      if (_czyPrzerwano) break;
 
-      ukonczone++;
-      if (ukonczone % 5 == 0 || ukonczone == kierunki.length) {
-        _logger.i('Postęp: $ukonczone/${kierunki.length} kierunków');
+      try {
+        final grupy = await future;
+        wszystkieGrupy.addAll(grupy);
+
+        ukonczone++;
+        if (ukonczone % 5 == 0 || ukonczone == kierunki.length) {
+          _logger.i('Postęp: $ukonczone/${kierunki.length} kierunków');
+        }
+      } catch (e) {
+        _logger.e('❌ Błąd podczas pobierania grup: $e');
       }
     }
 
+    _logger.i(
+        '✅ Pobrano grupy dla wszystkich kierunków. Łącznie ${wszystkieGrupy.length} grup');
     return wszystkieGrupy;
   }
 
   /// Pobiera grupy dla jednego kierunku
   Future<List<Grupa>> _pobierzGrupyDlaKierunku(Kierunek kierunek) async {
+    if (_czyPrzerwano) return [];
+
     try {
-      final response = await _klient.get(Uri.parse(kierunek.url));
+      final response = await _klient
+          .get(Uri.parse(kierunek.url))
+          .timeout(_timeout, onTimeout: () {
+        throw TimeoutException(
+            'Timeout podczas pobierania grup dla kierunku: ${kierunek.nazwa}');
+      });
       final dokument = parse(response.body);
 
       final grupy = <Grupa>[];
@@ -148,16 +241,19 @@ class ScraperService {
         }
       }
 
+      _logger.d(
+          '📊 Pobrano ${grupy.length} grup dla kierunku "${kierunek.nazwa}"');
       return grupy;
     } catch (e) {
-      _logger.e('Błąd przy pobieraniu grup dla kierunku ${kierunek.nazwa}: $e');
+      _logger
+          .e('❌ Błąd przy pobieraniu grup dla kierunku ${kierunek.nazwa}: $e');
       return [];
     }
   }
 
   /// Pobiera zajęcia dla grup poprzez pliki ICS (wielowątkowo)
   Future<List<Zajecia>> _pobierzZajecia(List<Grupa> grupy) async {
-    _logger.i('Pobieram zajęcia dla ${grupy.length} grup');
+    _logger.i('📅 Pobieram zajęcia dla ${grupy.length} grup');
 
     final wszystkieZajecia = <Zajecia>[];
     final futures = <Future<List<Zajecia>>>[];
@@ -165,88 +261,148 @@ class ScraperService {
 
     // Tworzymy zadania do wykonania
     for (final grupa in grupy) {
+      if (_czyPrzerwano) break;
       futures.add(pula.wykonaj(() => _pobierzZajeciaDlaGrupy(grupa)));
     }
 
     // Czekamy na wyniki i łączymy je
     int ukonczone = 0;
     for (final future in futures) {
-      final zajecia = await future;
-      wszystkieZajecia.addAll(zajecia);
+      if (_czyPrzerwano) break;
 
-      ukonczone++;
-      if (ukonczone % 20 == 0 || ukonczone == grupy.length) {
-        _logger.i('Postęp: $ukonczone/${grupy.length} grup');
+      try {
+        final zajecia = await future;
+        wszystkieZajecia.addAll(zajecia);
+
+        ukonczone++;
+        if (ukonczone % 20 == 0 || ukonczone == grupy.length) {
+          _logger.i('Postęp: $ukonczone/${grupy.length} grup');
+        }
+      } catch (e) {
+        _logger.e('❌ Błąd podczas pobierania zajęć: $e');
       }
     }
 
+    _logger.i(
+        '✅ Pobrano zajęcia dla wszystkich grup. Łącznie ${wszystkieZajecia.length} zajęć');
     return wszystkieZajecia;
   }
 
   /// Pobiera zajęcia dla jednej grupy
   Future<List<Zajecia>> _pobierzZajeciaDlaGrupy(Grupa grupa) async {
+    if (_czyPrzerwano) return [];
+
     try {
-      final response = await _klient.get(Uri.parse(grupa.urlIcs));
+      final response = await _klient
+          .get(Uri.parse(grupa.urlIcs))
+          .timeout(_timeout, onTimeout: () {
+        throw TimeoutException(
+            'Timeout podczas pobierania zajęć dla grupy: ${grupa.id}');
+      });
+
       if (response.statusCode != 200) {
         _logger.w(
             'Nie udało się pobrać pliku ICS dla grupy ${grupa.id}: ${response.statusCode}');
         return [];
       }
 
-      // Używamy klasy IcsParser zamiast _parsujPlikIcs
-      return _icsParser.parsujIcs(response.body, grupaId: grupa.id);
+      // Używamy klasy IcsParser
+      final zajecia = _icsParser.parsujIcs(response.body, grupaId: grupa.id);
+      _logger.d('📊 Pobrano ${zajecia.length} zajęć dla grupy ${grupa.id}');
+      return zajecia;
     } catch (e) {
-      _logger.e('Błąd podczas pobierania zajęć dla grupy ${grupa.id}: $e');
+      _logger.e('❌ Błąd podczas pobierania zajęć dla grupy ${grupa.id}: $e');
       return [];
     }
   }
 
   /// Zapisuje kierunki do bazy Supabase
   Future<void> _zapiszKierunki(List<Kierunek> kierunki) async {
-    _logger.i('Zapisuję ${kierunki.length} kierunków do bazy');
+    _logger.i('💾 Zapisuję ${kierunki.length} kierunków do bazy');
 
-    // Zapisujemy w paczkach po 100 elementów
-    for (var i = 0; i < kierunki.length; i += 100) {
-      final koniec = (i + 100 < kierunki.length) ? i + 100 : kierunki.length;
-      final paczka = kierunki.sublist(i, koniec);
+    try {
+      // Zapisujemy w paczkach po 100 elementów
+      for (var i = 0; i < kierunki.length; i += 100) {
+        if (_czyPrzerwano) break;
 
-      await _supabase
-          .from('kierunki')
-          .upsert(paczka.map((k) => k.toJson()).toList(), onConflict: 'url');
+        final koniec = (i + 100 < kierunki.length) ? i + 100 : kierunki.length;
+        final paczka = kierunki.sublist(i, koniec);
+
+        _logger.d(
+            '📤 Zapisuję paczkę kierunków ${i + 1}-$koniec/${kierunki.length}...');
+        await _supabase
+            .from('kierunki')
+            .upsert(paczka.map((k) => k.toJson()).toList(), onConflict: 'url');
+
+        _logger.d(
+            '✅ Zapisano paczkę kierunków ${i + 1}-$koniec/${kierunki.length}');
+      }
+    } catch (e, stack) {
+      _logger.e(
+          '❌ Błąd podczas zapisywania kierunków: $e\nTyp błędu: ${e.runtimeType}',
+          error: e,
+          stackTrace: stack);
+      rethrow;
     }
   }
 
   /// Zapisuje grupy do bazy Supabase
   Future<void> _zapiszGrupy(List<Grupa> grupy) async {
-    _logger.i('Zapisuję ${grupy.length} grup do bazy');
+    _logger.i('💾 Zapisuję ${grupy.length} grup do bazy');
 
-    // Zapisujemy w paczkach po 100 elementów
-    for (var i = 0; i < grupy.length; i += 100) {
-      final koniec = (i + 100 < grupy.length) ? i + 100 : grupy.length;
-      final paczka = grupy.sublist(i, koniec);
+    try {
+      // Zapisujemy w paczkach po 100 elementów
+      for (var i = 0; i < grupy.length; i += 100) {
+        if (_czyPrzerwano) break;
 
-      await _supabase.from('grupy').upsert(
-          paczka.map((g) => g.toJson()).toList(),
-          onConflict: 'url_ics');
+        final koniec = (i + 100 < grupy.length) ? i + 100 : grupy.length;
+        final paczka = grupy.sublist(i, koniec);
+
+        _logger
+            .d('📤 Zapisuję paczkę grup ${i + 1}-$koniec/${grupy.length}...');
+        await _supabase.from('grupy').upsert(
+            paczka.map((g) => g.toJson()).toList(),
+            onConflict: 'url_ics');
+
+        _logger.d('✅ Zapisano paczkę grup ${i + 1}-$koniec/${grupy.length}');
+      }
+    } catch (e, stack) {
+      _logger.e(
+          '❌ Błąd podczas zapisywania grup: $e\nTyp błędu: ${e.runtimeType}',
+          error: e,
+          stackTrace: stack);
+      rethrow;
     }
   }
 
   /// Zapisuje zajęcia do bazy Supabase
   Future<void> _zapiszZajecia(List<Zajecia> zajecia) async {
-    _logger.i('Zapisuję ${zajecia.length} zajęć do bazy');
+    _logger.i('💾 Zapisuję ${zajecia.length} zajęć do bazy');
 
-    // Zapisujemy w paczkach po 100 elementów
-    for (var i = 0; i < zajecia.length; i += 100) {
-      final koniec = (i + 100 < zajecia.length) ? i + 100 : zajecia.length;
-      final paczka = zajecia.sublist(i, koniec);
+    try {
+      // Zapisujemy w paczkach po 100 elementów
+      for (var i = 0; i < zajecia.length; i += 100) {
+        if (_czyPrzerwano) break;
 
-      await _supabase
-          .from('zajecia')
-          .upsert(paczka.map((z) => z.toJson()).toList(), onConflict: 'uid');
+        final koniec = (i + 100 < zajecia.length) ? i + 100 : zajecia.length;
+        final paczka = zajecia.sublist(i, koniec);
 
-      if ((i + 100) % 1000 == 0 || koniec == zajecia.length) {
-        _logger.i('Zapisano $koniec/${zajecia.length} zajęć');
+        _logger.d(
+            '📤 Zapisuję paczkę zajęć ${i + 1}-$koniec/${zajecia.length}...');
+        await _supabase
+            .from('zajecia')
+            .upsert(paczka.map((z) => z.toJson()).toList(), onConflict: 'uid');
+
+        if ((i + 100) % 1000 == 0 || koniec == zajecia.length) {
+          _logger.i('Zapisano $koniec/${zajecia.length} zajęć');
+        }
       }
+    } catch (e, stack) {
+      _logger.e(
+          '❌ Błąd podczas zapisywania zajęć: $e\nTyp błędu: ${e.runtimeType}',
+          error: e,
+          stackTrace: stack);
+      rethrow;
     }
   }
 }
@@ -255,17 +411,17 @@ class ScraperService {
 class _PulaZadan {
   final int _maksZadan;
   int _aktualneZadania = 0;
-  final _kolejka = <Completer>[];
+  final _kolejka = <Completer<void>>[];
 
   _PulaZadan(this._maksZadan);
 
   Future<void> _zajmijMiejsce() async {
     if (_aktualneZadania < _maksZadan) {
       _aktualneZadania++;
-      return Future.value();
+      return Future<void>.value();
     }
 
-    final completer = Completer();
+    final completer = Completer<void>();
     _kolejka.add(completer);
     return completer.future;
   }

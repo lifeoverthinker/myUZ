@@ -4,7 +4,18 @@ import 'package:supabase/supabase.dart';
 import 'dart:io';
 
 void main() async {
-  final logger = Logger();
+  final logger = Logger(
+    printer: PrettyPrinter(
+      methodCount: 0,
+      errorMethodCount: 5,
+      lineLength: 80,
+      colors: true,
+      printEmojis: true,
+      dateTimeFormat:
+          DateTimeFormat.onlyTimeAndSinceStart, // zamiast printTime: true
+    ),
+    level: Level.trace, // zamiast Level.verbose
+  );
 
   try {
     logger.i('🚀 Inicjalizacja Supabase');
