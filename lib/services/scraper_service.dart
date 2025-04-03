@@ -6,7 +6,7 @@ import 'package:my_uz/models/kierunek_model.dart';
 import 'package:my_uz/models/grupa_model.dart';
 import 'package:my_uz/models/zajecia_model.dart';
 import 'package:my_uz/utils/constants.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase/supabase.dart';
 import 'package:my_uz/services/ics_parser.dart';
 
 class ScraperService {
@@ -17,13 +17,17 @@ class ScraperService {
   final _klient = http.Client();
 
   // Klient Supabase do zapisywania danych
-  final _supabase = Supabase.instance.client;
+  final SupabaseClient _supabase;
 
   // Parser ICS
   final _icsParser = IcsParser();
 
   // Maksymalna liczba równoległych zadań
   final int _maxRownoleglychZadan = 10;
+
+  // Konstruktor przyjmujący klienta Supabase
+  ScraperService({required SupabaseClient supabaseClient})
+      : _supabase = supabaseClient;
 
   /// Główna metoda scrapowania
   Future<void> uruchomScrapowanie() async {
@@ -65,7 +69,6 @@ class ScraperService {
     final wydzialy = dokument.querySelectorAll('div.panel');
 
     for (final wydzial in wydzialy) {
-
       final kierunkiElementy = wydzial.querySelectorAll('li.list-group-item a');
       for (final kierunekElement in kierunkiElementy) {
         final nazwa = kierunekElement.text.trim();

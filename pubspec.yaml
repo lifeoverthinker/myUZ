@@ -12,8 +12,9 @@ dependencies:
   html:
   icalendar_parser:
   logger:
-  supabase_flutter:
+  supabase:
   uuid:
+  provider:
 
 dev_dependencies:
   flutter_test:

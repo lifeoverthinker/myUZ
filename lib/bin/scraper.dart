@@ -1,29 +1,25 @@
 import 'package:logger/logger.dart';
 import 'package:my_uz/services/scraper_service.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase/supabase.dart';
 import 'dart:io';
 
 void main() async {
   final logger = Logger();
 
   try {
-    // Inicjalizacja Supabase
     logger.i('🚀 Inicjalizacja Supabase');
-    final supabaseUrl = Platform.environment['SUPABASE_URL'] ?? '';
-    final supabaseKey = Platform.environment['SUPABASE_SERVICE_ROLE_KEY'] ?? '';
 
-    if (supabaseUrl.isEmpty || supabaseKey.isEmpty) {
-      throw Exception('Brak kluczy Supabase w zmiennych środowiskowych');
-    }
+    // Pobieranie kluczy ze zmiennych środowiskowych
+    final supabaseUrl = Platform.environment['SUPABASE_URL'] ??
+        'https://aovlvwjbnjsfplpgqzjv.supabase.co';
+    final supabaseKey = Platform.environment['SUPABASE_SERVICE_ROLE_KEY'] ??
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFvdmx2d2pibmpzZnBscGdxemp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE5ODY5OTEsImV4cCI6MjA1NzU2Mjk5MX0.TYvFUUhrksgleb-jiLDa-TxdItWuEO_CqIClPYyHdN0';
 
-    await Supabase.initialize(
-      url: supabaseUrl,
-      anonKey: supabaseKey,
-    );
+    // Tworzenie klienta
+    final supabaseClient = SupabaseClient(supabaseUrl, supabaseKey);
 
-    // Uruchomienie scrapera
     logger.i('🔍 Rozpoczęcie scrapowania planów zajęć');
-    final scraper = ScraperService();
+    final scraper = ScraperService(supabaseClient: supabaseClient);
     await scraper.uruchomScrapowanie();
     logger.i('🎉 Pomyślnie zakończono scrapowanie');
   } catch (e, stackTrace) {
