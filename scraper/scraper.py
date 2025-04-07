@@ -2,18 +2,22 @@ import requests
 from bs4 import BeautifulSoup
 import logging
 import re
-from typing import Dict, List, Any, Optional, Tuple
+import time
+from typing import Dict, List, Any, Optional, Tuple, Set
 from collections import defaultdict
 from datetime import datetime
+import concurrent.futures
+from queue import Queue
+import threading
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class PlanUZScraper:
     BASE_URL = "https://plan.uz.zgora.pl"
 
     # Metadata
-    VERSION = "2.1.0"
+    VERSION = "3.0.0"
     LAST_UPDATE = "2025-04-07"
     UPDATED_BY = "lifeoverthinker"
 
@@ -27,17 +31,38 @@ class PlanUZScraper:
         "WPA": "Wydział Nauk Prawnych i Ekonomicznych - terminy zjazdów"
     }
 
+    # Limity wielowątkowości
+    MAX_WORKERS = 10  # Maksymalna liczba równoległych wątków
+    REQUEST_DELAY = 0.2  # Opóźnienie między zapytaniami (w sekundach) dla uniknięcia rate limiting
+
     def __init__(self):
-        self.session = requests.Session()
-        # Cache dla kierunków posortowanych według wydziałów
+        self._session_local = threading.local()  # Sesja dla każdego wątku osobno
+
+        # Cache dla kierunków i wydziałów
         self._kierunki_cache = None
         self._wydzialy_cache = None
-        self._terminy_kalendarzy_cache = {}  # Cache dla terminów wydziałów (ID -> lista dat)
+
+        # Cache dla terminów - używamy thread-safe Dictionary
+        self._terminy_kalendarzy_lock = threading.Lock()
+        self._terminy_kalendarzy_cache = {}
+
+        # Rate limiting - używamy Semaphore
+        self._request_semaphore = threading.BoundedSemaphore(self.MAX_WORKERS)
+
+        # Timestamp rozpoczęcia
         self.scrape_timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
         logger.info(f"Inicjalizacja scrapera PlanUZ v{self.VERSION}")
         logger.info(f"Data aktualizacji: {self.LAST_UPDATE}, Autor: {self.UPDATED_BY}")
         logger.info(f"Rozpoczęcie scrapowania: {self.scrape_timestamp}")
+        logger.info(f"Konfiguracja wielowątkowości: Maksymalna liczba wątków: {self.MAX_WORKERS}")
+
+    @property
+    def session(self):
+        """Thread-local session dla bezpiecznych zapytań HTTP z wielu wątków"""
+        if not hasattr(self._session_local, 'session'):
+            self._session_local.session = requests.Session()
+        return self._session_local.session
 
     def get_metadata(self) -> Dict[str, str]:
         """Zwraca metadane o scraperze"""
@@ -48,12 +73,19 @@ class PlanUZScraper:
             "scrape_timestamp": self.scrape_timestamp
         }
 
+    def _make_request(self, url: str) -> requests.Response:
+        """Wykonuje zapytanie HTTP z uwzględnieniem rate limiting"""
+        with self._request_semaphore:
+            time.sleep(self.REQUEST_DELAY)  # Minimalne opóźnienie między zapytaniami
+            return self.session.get(url)
+
     def get_kierunki(self) -> List[Dict[str, str]]:
         """Pobiera listę kierunków"""
+        # Ta funkcja nie jest uruchamiana wielowątkowo, bo jest wywoływana tylko raz
         url = f"{self.BASE_URL}/grupy_lista_kierunkow.php"
         logger.info(f"Pobieranie listy kierunków z {url}")
 
-        response = self.session.get(url)
+        response = self._make_request(url)
         soup = BeautifulSoup(response.text, 'html.parser')
 
         kierunki = []
@@ -119,7 +151,7 @@ class PlanUZScraper:
         url = f"{self.BASE_URL}/{kierunek_link}"
         logger.info(f"Pobieranie grup z {url}")
 
-        response = self.session.get(url)
+        response = self._make_request(url)
         soup = BeautifulSoup(response.text, 'html.parser')
 
         grupy = []
@@ -156,7 +188,7 @@ class PlanUZScraper:
                             'data_aktualizacji': self.scrape_timestamp
                         })
 
-        logger.info(f"Znaleziono {len(grupy)} grup")
+        logger.info(f"Znaleziono {len(grupy)} grup dla kierunku {kierunek_link}")
         return grupy
 
     def get_plan_grupy(self, grupa_link: str) -> Dict[str, Any]:
@@ -164,8 +196,15 @@ class PlanUZScraper:
         url = f"{self.BASE_URL}/{grupa_link}"
         logger.info(f"Pobieranie planu z {url}")
 
-        response = self.session.get(url)
+        response = self._make_request(url)
         soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Pobierz kod grupy bezpośrednio z nagłówka H2
+        kod_grupy = ""
+        h2_elements = soup.find_all('h2')
+        if len(h2_elements) >= 2:  # Drugi H2 zawiera zawsze kod grupy
+            kod_grupy = h2_elements[1].text.strip()
+            logger.info(f"Znaleziono kod grupy: {kod_grupy}")
 
         # Pobierz link do ICS
         ics_link = ""
@@ -200,10 +239,33 @@ class PlanUZScraper:
                 komorki = wiersz.find_all('td')
                 if len(komorki) >= 8:  # Musi być co najmniej 8 kolumn
                     try:
+                        # Pobierz informację o podgrupie (PG)
+                        podgrupa = komorki[0].text.strip()
+                        if podgrupa in ["Â", "&nbsp;", ""] or podgrupa.isspace():
+                            podgrupa = ""
+
                         od = komorki[1].text.strip()
                         do = komorki[2].text.strip()
                         przedmiot = komorki[3].text.strip()
-                        typ_zajec = komorki[4].find('label').text.strip() if komorki[4].find('label') else ""
+
+                        # Pobierz pełny kod rodzaju zajęć (może być dłuższy niż 1 znak)
+                        typ_zajec_element = komorki[4].find('label')
+                        typ_zajec = ""
+                        typ_zajec_opis = ""
+
+                        if typ_zajec_element:
+                            typ_zajec = typ_zajec_element.text.strip()
+                            # Pobierz także pełny opis typu zajęć z atrybutu title
+                            title = typ_zajec_element.get('title', '')
+                            if title:
+                                # Usuń znaczniki HTML z title
+                                title = re.sub(r'<[^>]+>', '', title)
+                                # Wyizoluj opis po myślniku
+                                title_parts = title.split('-')
+                                if len(title_parts) > 1:
+                                    typ_zajec_opis = title_parts[1].strip()
+                                else:
+                                    typ_zajec_opis = title.strip()
 
                         # Pobierz prowadzących - może być kilku
                         prowadzacy_cell = komorki[5]
@@ -252,16 +314,19 @@ class PlanUZScraper:
                             'do': do,
                             'przedmiot': przedmiot,
                             'typ_zajec': typ_zajec,
+                            'typ_zajec_pelny': typ_zajec_opis,
                             'prowadzacy': prowadzacy_str,
                             'miejsce': miejsce_str,
                             'terminy': terminy,
-                            'kalendarz_id': kalendarz_id
+                            'kalendarz_id': kalendarz_id,
+                            'podgrupa': podgrupa
                         }
                         wydarzenia.append(wydarzenie)
                     except Exception as e:
                         logger.error(f"Błąd podczas parsowania wiersza: {str(e)}")
 
         return {
+            'kod_grupy': kod_grupy,
             'link_ics': ics_link,
             'nauczyciele': nauczyciele,
             'wydarzenia': wydarzenia,
@@ -271,13 +336,14 @@ class PlanUZScraper:
     def get_kalendarz_terminy(self, kalendarz_id: str) -> List[str]:
         """Pobiera terminy z kalendarza dla danego ID"""
         # Najpierw sprawdź cache
-        if kalendarz_id in self._terminy_kalendarzy_cache:
-            return self._terminy_kalendarzy_cache[kalendarz_id]
+        with self._terminy_kalendarzy_lock:
+            if kalendarz_id in self._terminy_kalendarzy_cache:
+                return self._terminy_kalendarzy_cache[kalendarz_id]
 
         url = f"{self.BASE_URL}/kalendarze_lista_szczegoly.php?ID={kalendarz_id}"
         logger.info(f"Pobieranie terminów z kalendarza {url}")
 
-        response = self.session.get(url)
+        response = self._make_request(url)
         soup = BeautifulSoup(response.text, 'html.parser')
 
         daty = []
@@ -293,7 +359,9 @@ class PlanUZScraper:
                             daty.append(data)
 
         # Zapisz do cache
-        self._terminy_kalendarzy_cache[kalendarz_id] = daty
+        with self._terminy_kalendarzy_lock:
+            self._terminy_kalendarzy_cache[kalendarz_id] = daty
+
         return daty
 
     def get_nauczyciel_info(self, nauczyciel_link: str) -> Dict[str, str]:
@@ -301,7 +369,7 @@ class PlanUZScraper:
         url = f"{self.BASE_URL}/{nauczyciel_link}"
         logger.info(f"Pobieranie informacji o nauczycielu z {url}")
 
-        response = self.session.get(url)
+        response = self._make_request(url)
         soup = BeautifulSoup(response.text, 'html.parser')
 
         imie_nazwisko = soup.find('h2').text.strip() if soup.find('h2') else ""
@@ -327,189 +395,124 @@ class PlanUZScraper:
             'data_aktualizacji': self.scrape_timestamp
         }
 
-    def get_nauczyciel_plan(self, nauczyciel_link: str) -> Dict[str, Any]:
-        """Pobiera plan zajęć nauczyciela z terminami"""
-        url = f"{self.BASE_URL}/{nauczyciel_link}"
-        logger.info(f"Pobieranie planu zajęć nauczyciela z {url}")
-
-        response = self.session.get(url)
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        # Pobierz link do ICS
-        ics_link = ""
-        for a_tag in soup.find_all('a'):
-            href = a_tag.get('href', '')
-            if 'nauczyciel_ics.php' in href:
-                ics_link = href
-                break
-
-        # Pobierz plan zajęć z tabelą i terminami
-        wydarzenia = []
-        tabela_plan = soup.find('table', class_='table-bordered')
-        if tabela_plan:
-            for wiersz in tabela_plan.find_all('tr', class_=lambda x: x and ('even' in x or 'odd' in x)):
-                # Pomiń ewentualne nagłówki bez danych
-                if not wiersz.find('td'):
-                    continue
-
-                # Pobierz dane o zajęciach
-                komorki = wiersz.find_all('td')
-                if len(komorki) >= 8:  # Musi być co najmniej 8 kolumn
-                    try:
-                        od = komorki[1].text.strip()
-                        do = komorki[2].text.strip()
-                        przedmiot = komorki[3].text.strip()
-                        typ_zajec = komorki[4].find('label').text.strip() if komorki[4].find('label') else ""
-
-                        # Pobierz grupy - może być kilka
-                        grupy_cell = komorki[5]
-                        grupy = [a.text.strip() for a in grupy_cell.find_all('a')]
-                        grupy_str = "; ".join(grupy)
-
-                        # Pobierz miejsce - może być kilka
-                        miejsce_cell = komorki[6]
-                        miejsca = [a.text.strip() for a in miejsce_cell.find_all('a')]
-                        miejsca_raw = miejsce_cell.text.strip()
-                        if not miejsca:
-                            miejsca = [miejsca_raw]
-                        miejsce_str = "; ".join(miejsca)
-
-                        # Pobierz terminy zajęć
-                        terminy_cell = komorki[7]
-                        terminy_text = terminy_cell.text.strip()
-                        terminy_link = terminy_cell.find('a')
-
-                        terminy = ""
-                        kalendarz_id = None
-
-                        if terminy_link:
-                            terminy_text = terminy_link.text.strip()
-                            # Pobierz ID kalendarza jeśli jest link
-                            kalendarz_match = re.search(r'ID=(\d+)', terminy_link.get('href', ''))
-                            if kalendarz_match:
-                                kalendarz_id = kalendarz_match.group(1)
-
-                        # Przetwórz terminy
-                        if terminy_text:
-                            if ";" in terminy_text:  # Lista konkretnych dat
-                                terminy = terminy_text
-                            elif terminy_text in self.TERMINY_KODY:  # Znany kod terminu
-                                terminy = self.TERMINY_KODY[terminy_text]
-                            elif kalendarz_id:  # Link do kalendarza - pobierz szczegóły
-                                kalendarz_daty = self.get_kalendarz_terminy(kalendarz_id)
-                                if kalendarz_daty:
-                                    terminy = "; ".join(kalendarz_daty)
-                            else:
-                                terminy = terminy_text
-
-                        # Dodaj wydarzenie do listy
-                        wydarzenie = {
-                            'od': od,
-                            'do': do,
-                            'przedmiot': przedmiot,
-                            'typ_zajec': typ_zajec,
-                            'grupy': grupy_str,
-                            'miejsce': miejsce_str,
-                            'terminy': terminy,
-                            'kalendarz_id': kalendarz_id
-                        }
-                        wydarzenia.append(wydarzenie)
-                    except Exception as e:
-                        logger.error(f"Błąd podczas parsowania wiersza: {str(e)}")
-
-        return {
-            'link_ics': ics_link,
-            'wydarzenia': wydarzenia,
-            'data_aktualizacji': self.scrape_timestamp
-        }
-
     def download_ics(self, ics_url: str) -> str:
         """Pobiera plik ICS"""
         full_url = f"{self.BASE_URL}/{ics_url}" if not ics_url.startswith('http') else ics_url
         logger.info(f"Pobieranie pliku ICS z {full_url}")
 
-        response = self.session.get(full_url)
+        response = self._make_request(full_url)
         return response.text
 
-    # --- METODY OBSŁUGI ICS ---
+    # --- METODY WIELOWĄTKOWE ---
 
-    def parse_ics_and_enrich(self, ics_content: str, plan_html: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Parsuje plik ICS i wzbogaca go o terminy z planu HTML"""
-        from datetime import datetime
-        import re
+    def get_all_grupy_multi(self, kierunki: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Pobiera grupy dla wielu kierunków równolegle"""
+        wszystkie_grupy = []
 
-        wydarzenia_ics = []
-        wydarzenia_html = {self._create_event_key(e): e for e in plan_html.get('wydarzenia', [])}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
+            futures = {executor.submit(self.get_grupy, kierunek['link_grupy']): kierunek for kierunek in kierunki}
 
-        current_event = None
-        for line in ics_content.splitlines():
-            line = line.strip()
+            for future in concurrent.futures.as_completed(futures):
+                kierunek = futures[future]
+                try:
+                    grupy = future.result()
+                    # Dodajemy do każdej grupy informacje o kierunku
+                    for grupa in grupy:
+                        grupa['kierunek_nazwa'] = kierunek['nazwa_kierunku']
+                        grupa['kierunek_id'] = kierunek['kierunek_id']
+                        grupa['wydzial'] = kierunek['wydzial']
+                    wszystkie_grupy.extend(grupy)
+                    logger.info(f"Pobrano {len(grupy)} grup dla kierunku {kierunek['nazwa_kierunku']}")
+                except Exception as e:
+                    logger.error(f"Błąd podczas pobierania grup dla kierunku {kierunek['nazwa_kierunku']}: {str(e)}")
 
-            if line == "BEGIN:VEVENT":
-                current_event = {}
-            elif line == "END:VEVENT" and current_event:
-                # Wzbogać wydarzenie o terminy z HTML
-                key = self._create_event_key(current_event)
-                if key in wydarzenia_html:
-                    current_event['terminy'] = wydarzenia_html[key].get('terminy', '')
+        logger.info(f"Łącznie pobrano {len(wszystkie_grupy)} grup")
+        return wszystkie_grupy
 
-                wydarzenia_ics.append(current_event)
-                current_event = None
-            elif current_event is not None and ":" in line:
-                key, value = line.split(":", 1)
+    def get_all_plany_grup_multi(self, grupy: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """Pobiera plany zajęć dla wielu grup równolegle"""
+        plany_grup = {}
 
-                # Przetwarzanie daty i czasu
-                if key == "DTSTART":
-                    # Format: 20250402T104000
-                    try:
-                        dt = datetime.strptime(value, "%Y%m%dT%H%M%S")
-                        current_event["od"] = dt.strftime("%H:%M:%S")
-                        current_event["data"] = dt.strftime("%Y-%m-%d")
-                    except ValueError:
-                        current_event["od"] = value
-                elif key == "DTEND":
-                    try:
-                        dt = datetime.strptime(value, "%Y%m%dT%H%M%S")
-                        current_event["do"] = dt.strftime("%H:%M:%S")
-                    except ValueError:
-                        current_event["do"] = value
-                elif key == "SUMMARY":
-                    # Przykład: "Animacja obrazu graficznego (Ć): mgr Joanna Fuczko"
-                    self._parse_summary(current_event, value)
-                elif key == "LOCATION":
-                    current_event["miejsce"] = value
-                elif key == "CATEGORIES":
-                    current_event["typ_zajec"] = value
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
+            futures = {executor.submit(self.get_plan_grupy, grupa['link_planu']): grupa for grupa in grupy}
 
-        return wydarzenia_ics
+            for future in concurrent.futures.as_completed(futures):
+                grupa = futures[future]
+                try:
+                    plan = future.result()
+                    plany_grup[grupa['link_planu']] = plan
+                    logger.info(f"Pobrano plan zajęć dla grupy {grupa['nazwa_grupy']}")
+                except Exception as e:
+                    logger.error(f"Błąd podczas pobierania planu dla grupy {grupa['nazwa_grupy']}: {str(e)}")
 
-    def _parse_summary(self, event: Dict[str, Any], summary: str) -> None:
-        """Parsuje pole SUMMARY i wypełnia odpowiednie pola w event"""
-        # Przykład: "Animacja obrazu graficznego (Ć): mgr Joanna Fuczko"
-        match = re.match(r"(.*?)\s*(\([^)]+\))?\s*:?\s*(.*)", summary)
+        logger.info(f"Pobrano plany zajęć dla {len(plany_grup)} grup")
+        return plany_grup
 
-        if match:
-            przedmiot, typ_zajec, prowadzacy = match.groups()
+    def get_all_nauczyciele_multi(self, plany_grup: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """Pobiera informacje o nauczycielach równolegle"""
+        nauczyciele = {}
+        nauczyciele_do_pobrania = set()
 
-            event["przedmiot"] = przedmiot.strip() if przedmiot else ""
+        # Najpierw zbierz wszystkich unikalnych nauczycieli
+        for plan in plany_grup.values():
+            for nauczyciel in plan.get('nauczyciele', []):
+                nauczyciele_do_pobrania.add((nauczyciel['link'], nauczyciel['nazwa']))
 
-            if typ_zajec:
-                # Usunięcie nawiasów
-                event["typ_zajec"] = typ_zajec.strip("() ")
+        logger.info(f"Znaleziono {len(nauczyciele_do_pobrania)} unikalnych nauczycieli do pobrania")
 
-            event["prowadzacy"] = prowadzacy.strip() if prowadzacy else ""
-        else:
-            # Jeśli nie udało się sparsować, zachowaj oryginalne SUMMARY
-            event["przedmiot"] = summary
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
+            futures = {executor.submit(self.get_nauczyciel_info, link): (link, nazwa)
+                       for link, nazwa in nauczyciele_do_pobrania}
 
-    def _create_event_key(self, event: Dict[str, Any]) -> str:
-        """Tworzy unikalny klucz dla wydarzenia bazując na przedmiocie, czasie i typie zajęć"""
-        przedmiot = event.get('przedmiot', '')
-        od = event.get('od', '')
-        typ_zajec = event.get('typ_zajec', '')
-        return f"{przedmiot}_{od}_{typ_zajec}".lower().replace(' ', '_')
+            for future in concurrent.futures.as_completed(futures):
+                link, nazwa = futures[future]
+                try:
+                    info = future.result()
+                    nauczyciele[link] = info
+                    logger.info(f"Pobrano informacje o nauczycielu {nazwa}")
+                except Exception as e:
+                    logger.error(f"Błąd podczas pobierania informacji o nauczycielu {nazwa}: {str(e)}")
 
-    # --- METODY SEGREGACJI I WYSZUKIWANIA ---
+        logger.info(f"Pobrano informacje o {len(nauczyciele)} nauczycielach")
+        return nauczyciele
+
+    # --- GŁÓWNE METODY SCRAPERA ---
+
+    def scrapuj_wszystko(self) -> Dict[str, Any]:
+        """Główna metoda uruchamiająca pełny proces scrapowania"""
+        start_time = time.time()
+        logger.info("Rozpoczynanie pełnego procesu scrapowania")
+
+        # 1. Pobieramy kierunki
+        kierunki = self.get_kierunki()
+
+        # 2. Pobieramy grupy równolegle
+        grupy = self.get_all_grupy_multi(kierunki)
+
+        # 3. Pobieramy plany grup równolegle
+        plany_grup = self.get_all_plany_grup_multi(grupy)
+
+        # 4. Pobieramy informacje o nauczycielach równolegle
+        nauczyciele = self.get_all_nauczyciele_multi(plany_grup)
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"Zakończono pełny proces scrapowania w {elapsed_time:.2f} sekund")
+
+        return {
+            'kierunki': kierunki,
+            'grupy': grupy,
+            'plany_grup': plany_grup,
+            'nauczyciele': nauczyciele,
+            'statystyki': {
+                'czas_wykonania': f"{elapsed_time:.2f} s",
+                'liczba_kierunkow': len(kierunki),
+                'liczba_grup': len(grupy),
+                'liczba_planow': len(plany_grup),
+                'liczba_nauczycieli': len(nauczyciele)
+            }
+        }
+
+    # --- POMOCNICZE METODY ---
 
     def get_kierunki_by_wydzial(self) -> Dict[str, List[Dict[str, str]]]:
         """Zwraca kierunki pogrupowane według wydziałów"""
@@ -539,52 +542,3 @@ class PlanUZScraper:
             self._wydzialy_cache = sorted(list(wydzialy))
 
         return self._wydzialy_cache
-
-    def get_statystyki(self) -> Dict[str, Any]:
-        """Zwraca statystyki dotyczące kierunków i grup"""
-        if not self._kierunki_cache:
-            self.get_kierunki()
-
-        # Liczba kierunków według typu
-        typy_kierunkow = defaultdict(int)
-        for kierunek in self._kierunki_cache:
-            typy_kierunkow[kierunek.get('typ_kierunku', 'standardowy')] += 1
-
-        # Liczba kierunków według wydziału
-        kierunki_wg_wydzialu = defaultdict(int)
-        for kierunek in self._kierunki_cache:
-            kierunki_wg_wydzialu[kierunek['wydzial']] += 1
-
-        return {
-            'liczba_kierunkow': len(self._kierunki_cache),
-            'liczba_wydzialow': len(self.get_wydzialy()),
-            'typy_kierunkow': dict(typy_kierunkow),
-            'kierunki_wg_wydzialu': dict(kierunki_wg_wydzialu),
-            'data_aktualizacji': self.scrape_timestamp
-        }
-
-    def search_kierunki(self, query: str) -> List[Dict[str, str]]:
-        """Wyszukuje kierunki według podanej frazy"""
-        if not self._kierunki_cache:
-            self.get_kierunki()
-
-        query = query.lower()
-        results = []
-
-        for kierunek in self._kierunki_cache:
-            if (query in kierunek['nazwa_kierunku'].lower() or
-                    query in kierunek['wydzial'].lower()):
-                results.append(kierunek)
-
-        return sorted(results, key=lambda k: (k['wydzial'], k['nazwa_kierunku']))
-
-    def get_kierunek_by_id(self, kierunek_id: str) -> Optional[Dict[str, str]]:
-        """Znajduje kierunek po ID"""
-        if not self._kierunki_cache:
-            self.get_kierunki()
-
-        for kierunek in self._kierunki_cache:
-            if kierunek['kierunek_id'] == kierunek_id:
-                return kierunek
-
-        return None
