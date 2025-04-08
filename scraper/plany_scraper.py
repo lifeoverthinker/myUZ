@@ -1,215 +1,222 @@
-"""
-Moduł do pobierania planów zajęć
-Autor: lifeoverthinker
-Data: 2025-04-08
-"""
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-import re
 import logging
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime
-from typing import List, Dict, Any, Optional
+import re
+from utils import get_soup_from_url, normalize_text, full_url
+from ics_parser import ICSParser
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('UZ_Scraper.Plany')
 
 class PlanyScraper:
-    """Klasa do pobierania planów zajęć"""
+    def __init__(self, db):
+        self.db = db
+        self.ics_parser = ICSParser()
 
-    BASE_URL = "https://plan.uz.zgora.pl"
-
-    # Słownik terminów (kody skrótów)
-    TERMINY_KODY = {
-        "D": "Dni robocze, studia stacjonarne",
-        "DI": "Studia stacjonarne I-sza połowa sem.",
-        "DII": "Studia stacjonarne II-ga połowa sem.",
-        "DN": "Studia stacjonarne Nieparzyste",
-        "DP": "Studia stacjonarne Parzyste",
-        "WPA": "Wydział Nauk Prawnych i Ekonomicznych - terminy zjazdów"
-    }
-
-    def __init__(self):
-        self.session = requests.Session()
-        self.scrape_timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        self._terminy_kalendarzy_cache = {}  # Prosty cache dla terminów kalendarzy
-
-    def get_plan_grupy(self, grupa_link: str) -> Dict[str, Any]:
+    def scrape_and_save(self):
         """
-        Pobiera plan zajęć dla danej grupy
-
-        Args:
-            grupa_link: Link do planu zajęć grupy
+        Scrapuje plany zajęć dla grup i nauczycieli, zapisuje je do bazy danych.
 
         Returns:
-            Słownik z danymi planu zajęć
+            int: Liczba zaktualizowanych zajęć
         """
-        url = f"{self.BASE_URL}/{grupa_link}"
-        logger.info(f"Pobieranie planu z {url}")
+        logger.info("Rozpoczynam scrapowanie planów zajęć")
 
-        try:
-            response = self.session.get(url)
-            response.raise_for_status()
+        # 1. Scrapowanie planów grup
+        grupy_count = self.scrape_plany_grup()
 
-            soup = BeautifulSoup(response.text, 'html.parser')
+        # 2. Scrapowanie planów nauczycieli
+        nauczyciele_count = self.scrape_plany_nauczycieli()
 
-            # Pobierz kod grupy z nagłówka
-            kod_grupy = ""
-            h2_elements = soup.find_all('h2')
-            if len(h2_elements) >= 2:
-                kod_grupy = h2_elements[1].text.strip()
+        total_count = grupy_count + nauczyciele_count
+        logger.info("Zakończono scrapowanie planów. Zaktualizowano łącznie %s zajęć", total_count)
+        return total_count
 
-            # Pobierz link do pliku ICS
-            ics_link = ""
-            ics_element = soup.find('a', id='idGG')
-            if ics_element:
-                ics_link = ics_element.get('href', '')
-
-            # Pobierz linki do nauczycieli
-            nauczyciele = []
-            for a_tag in soup.find_all('a'):
-                href = a_tag.get('href', '')
-                if 'nauczyciel_plan.php' in href:
-                    match = re.search(r'ID=(\d+)', href)
-                    if match:
-                        nauczyciel_id = match.group(1)
-                        nauczyciele.append({
-                            'link': href,
-                            'nazwa': a_tag.text.strip(),
-                            'nauczyciel_id': nauczyciel_id
-                        })
-
-            # Pobierz plan zajęć z tabeli
-            wydarzenia = []
-            tabela_plan = soup.find('table', class_='table-bordered')
-            if tabela_plan:
-                for wiersz in tabela_plan.find_all('tr'):
-                    # Pomijamy wiersz nagłówkowy
-                    if wiersz.find('th'):
-                        continue
-
-                    # Pobierz komórki
-                    komorki = wiersz.find_all('td')
-                    if len(komorki) >= 7:
-                        try:
-                            # Pobierz dane z poszczególnych kolumn zgodnie z przybornik
-                            przedmiot = komorki[0].text.strip()
-                            nauczyciel = komorki[1].text.strip()
-                            rz = komorki[2].text.strip()  # Rodzaj zajęć
-                            miejsce = komorki[3].text.strip()
-                            terminy_html = komorki[4].text.strip()
-
-                            # Parsowanie godzin
-                            czas_tekst = komorki[5].text.strip()
-                            czas_match = re.search(r'(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})', czas_tekst)
-                            if czas_match:
-                                od_godz, od_min, do_godz, do_min = map(int, czas_match.groups())
-                                od = f"{od_godz:02d}:{od_min:02d}"
-                                do = f"{do_godz:02d}:{do_min:02d}"
-                            else:
-                                od = None
-                                do = None
-
-                            # Link do pojedynczego ICS
-                            event_ics = ""
-                            event_ics_link = komorki[6].find('a')
-                            if event_ics_link:
-                                event_ics = event_ics_link.get('href', '')
-
-                            # Terminy
-                            terminy = terminy_html
-
-                            # Dodaj wydarzenie do listy
-                            wydarzenia.append({
-                                'przedmiot': przedmiot,
-                                'prowadzacy': nauczyciel,
-                                'typ_zajec': rz,
-                                'miejsce': miejsce,
-                                'terminy': terminy,
-                                'od': od,
-                                'do': do,
-                                'link_ics': event_ics
-                            })
-                        except Exception as e:
-                            logger.error(f"Błąd podczas parsowania wiersza planu: {str(e)}")
-
-            return {
-                'kod_grupy': kod_grupy,
-                'link_ics': ics_link,
-                'nauczyciele': nauczyciele,
-                'wydarzenia': wydarzenia,
-                'data_aktualizacji': self.scrape_timestamp
-            }
-
-        except Exception as e:
-            logger.error(f"Błąd podczas pobierania planu grupy: {str(e)}")
-            return {
-                'kod_grupy': "",
-                'link_ics': "",
-                'nauczyciele': [],
-                'wydarzenia': [],
-                'data_aktualizacji': self.scrape_timestamp
-            }
-
-    def get_kalendarz_terminy(self, kalendarz_id: str) -> List[str]:
+    def scrape_plany_grup(self):
         """
-        Pobiera terminy z kalendarza dla danego ID
-
-        Args:
-            kalendarz_id: ID kalendarza
+        Scrapuje plany zajęć dla wszystkich grup.
 
         Returns:
-            Lista dat w formacie YYYY-MM-DD
+            int: Liczba zaktualizowanych zajęć
         """
-        # Sprawdź cache
-        if kalendarz_id in self._terminy_kalendarzy_cache:
-            return self._terminy_kalendarzy_cache[kalendarz_id]
+        logger.info("Scrapowanie planów zajęć dla grup studenckich")
 
-        url = f"{self.BASE_URL}/kalendarze_lista_szczegoly.php?ID={kalendarz_id}"
-        logger.info(f"Pobieranie terminów z kalendarza {url}")
+        grupy = self.db.get_all_grupy()
 
-        try:
-            response = self.session.get(url)
-            response.raise_for_status()
+        count = 0
+        for grupa in grupy:
+            if not grupa.get('link_planu'):
+                logger.warning("Grupa %s nie ma linku do planu", grupa.get('kod_grupy', 'bez kodu'))
+                continue
 
-            soup = BeautifulSoup(response.text, 'html.parser')
-            daty = []
+            grupa_id = grupa['id']
+            plan_link = grupa['link_planu']
 
-            tabela = soup.find('table', class_='table-bordered')
-            if tabela:
-                for wiersz in tabela.find_all('tr'):
-                    komorki = wiersz.find_all('td')
-                    if len(komorki) >= 2:
-                        data_cell = komorki[1]
-                        if data_cell:
-                            data = data_cell.text.strip()
-                            if re.match(r'\d{4}-\d{2}-\d{2}', data):
-                                daty.append(data)
+            # Pobieramy stronę z planem zajęć
+            soup = get_soup_from_url(plan_link)
+            if not soup:
+                logger.warning("Nie udało się pobrać planu dla grupy %s", grupa.get('kod_grupy', 'bez kodu'))
+                continue
 
-            # Zapisz do cache
-            self._terminy_kalendarzy_cache[kalendarz_id] = daty
-            return daty
+            # Szukamy linku do pliku ICS (kalendarz)
+            ics_link = self.find_ics_link(soup)
+            if not ics_link:
+                logger.warning("Nie znaleziono linku ICS dla grupy %s", grupa.get('kod_grupy', 'bez kodu'))
+                continue
 
-        except Exception as e:
-            logger.error(f"Błąd podczas pobierania terminów z kalendarza: {str(e)}")
-            return []
+            # Parsujemy zawartość pliku ICS
+            logger.info("Przetwarzanie planu ICS dla grupy %s", grupa.get('kod_grupy', 'bez kodu'))
+            events = self.ics_parser.parse_ics_url(ics_link)
 
-    def download_ics(self, ics_url: str) -> Optional[str]:
+            # Dla każdego wydarzenia w kalendarzu, zapisujemy je do bazy
+            event_count = 0
+            for event in events:
+                # Zapisujemy zajęcia
+                zajecia_data = {
+                    'przedmiot': event['summary'],
+                    'od': event['start'],
+                    'do_': event['end'],
+                    'miejsce': event.get('location', ''),
+                    'rz': event.get('description', '').strip(),
+                    'link_ics': ics_link
+                }
+
+                # Zapisujemy zajęcia i powiązanie z grupą
+                zajecia, is_new = self.db.upsert_zajecia(zajecia_data)
+                self.db.link_zajecia_to_grupa(zajecia['id'], grupa_id)
+
+                # Jeśli zajęcia są prowadzone przez nauczyciela, dodajemy powiązanie
+                nauczyciel_imie = self.extract_teacher_from_event(event)
+                if nauczyciel_imie:
+                    nauczyciel = self.db.get_nauczyciel_by_name(nauczyciel_imie)
+                    if nauczyciel:
+                        self.db.link_zajecia_to_nauczyciel(zajecia['id'], nauczyciel['id'])
+
+                event_count += 1
+                if is_new:
+                    count += 1
+
+            logger.info("Przetworzono %s zajęć dla grupy %s",
+                        event_count, grupa.get('kod_grupy', 'bez kodu'))
+
+        logger.info("Zakończono scrapowanie planów grup. Dodano %s nowych zajęć", count)
+        return count
+
+    def scrape_plany_nauczycieli(self):
         """
-        Pobiera plik ICS
-
-        Args:
-            ics_url: Adres URL pliku ICS
+        Scrapuje plany zajęć dla wszystkich nauczycieli.
 
         Returns:
-            Zawartość pliku ICS jako tekst lub None w przypadku błędu
+            int: Liczba zaktualizowanych zajęć
         """
-        full_url = f"{self.BASE_URL}/{ics_url}" if not ics_url.startswith('http') else ics_url
-        logger.info(f"Pobieranie pliku ICS z {full_url}")
+        logger.info("Scrapowanie planów zajęć dla nauczycieli")
 
-        try:
-            response = self.session.get(full_url)
-            response.raise_for_status()
-            return response.text
-        except Exception as e:
-            logger.error(f"Błąd podczas pobierania pliku ICS: {str(e)}")
-            return None
+        nauczyciele = self.db.get_all_nauczyciele()
+
+        count = 0
+        for nauczyciel in nauczyciele:
+            if not nauczyciel.get('link_planu'):
+                logger.warning("Nauczyciel %s nie ma linku do planu", nauczyciel.get('imie_nazwisko'))
+                continue
+
+            nauczyciel_id = nauczyciel['id']
+            plan_link = nauczyciel['link_planu']
+
+            # Pobieramy stronę z planem zajęć
+            soup = get_soup_from_url(plan_link)
+            if not soup:
+                logger.warning("Nie udało się pobrać planu dla nauczyciela %s",
+                               nauczyciel.get('imie_nazwisko'))
+                continue
+
+            # Szukamy linku do pliku ICS (kalendarz)
+            ics_link = self.find_ics_link(soup)
+            if not ics_link:
+                logger.warning("Nie znaleziono linku ICS dla nauczyciela %s",
+                               nauczyciel.get('imie_nazwisko'))
+                continue
+
+            # Parsujemy zawartość pliku ICS
+            logger.info("Przetwarzanie planu ICS dla nauczyciela %s",
+                        nauczyciel.get('imie_nazwisko'))
+            events = self.ics_parser.parse_ics_url(ics_link)
+
+            # Dla każdego wydarzenia w kalendarzu, zapisujemy je do bazy
+            event_count = 0
+            for event in events:
+                # Zapisujemy zajęcia
+                zajecia_data = {
+                    'przedmiot': event['summary'],
+                    'od': event['start'],
+                    'do_': event['end'],
+                    'miejsce': event.get('location', ''),
+                    'rz': event.get('description', '').strip(),
+                    'link_ics': ics_link
+                }
+
+                # Zapisujemy zajęcia i powiązanie z nauczycielem
+                zajecia, is_new = self.db.upsert_zajecia(zajecia_data)
+                self.db.link_zajecia_to_nauczyciel(zajecia['id'], nauczyciel_id)
+
+                # Jeśli zajęcia są dla grup, dodajemy powiązania
+                grupy_kody = self.extract_groups_from_event(event)
+                for kod_grupy in grupy_kody:
+                    grupa = self.db.get_grupa_by_kod(kod_grupy)
+                    if grupa:
+                        self.db.link_zajecia_to_grupa(zajecia['id'], grupa['id'])
+
+                event_count += 1
+                if is_new:
+                    count += 1
+
+            logger.info("Przetworzono %s zajęć dla nauczyciela %s",
+                        event_count, nauczyciel.get('imie_nazwisko'))
+
+        logger.info("Zakończono scrapowanie planów nauczycieli. Dodano %s nowych zajęć", count)
+        return count
+
+    @staticmethod
+    def find_ics_link(soup):
+        """Znajduje link do pliku ICS na stronie z planem."""
+        ics_links = soup.select('a[href*=".ics"]')
+        if ics_links:
+            return full_url(ics_links[0].get('href'))
+        return None
+
+    @staticmethod
+    def extract_teacher_from_event(event):
+        """Wyciąga imię i nazwisko nauczyciela z wydarzenia w kalendarzu."""
+        description = event.get('description', '')
+
+        # Szukanie wzorca "Prowadzący: Nazwisko Imię"
+        teacher_pattern = re.compile(r'prowadz[ąa]cy:?\s*([^,\n]+)', re.IGNORECASE)
+        match = teacher_pattern.search(description)
+
+        if match:
+            return normalize_text(match.group(1))
+
+        return None
+
+    @staticmethod
+    def extract_groups_from_event(event):
+        """Wyciąga kody grup z wydarzenia w kalendarzu."""
+        description = event.get('description', '')
+        result = []
+
+        # Szukanie wzorca "grupy: xxxxx, yyyy"
+        groups_pattern = re.compile(r'grupy:?\s*([^,\n]+(?:,[^,\n]+)*)', re.IGNORECASE)
+        match = groups_pattern.search(description)
+
+        if match:
+            groups_text = match.group(1)
+            groups = [normalize_text(g) for g in groups_text.split(',')]
+            result.extend(groups)
+
+        # Szukanie wzorców kodów grup
+        kod_pattern = re.compile(r'\b\d+[A-Za-z]+-[A-Za-z]+-[\w-]+\b')
+        kod_matches = kod_pattern.findall(description)
+
+        if kod_matches:
+            result.extend(kod_matches)
+
+        return list(set(result))  # Usuwamy duplikaty

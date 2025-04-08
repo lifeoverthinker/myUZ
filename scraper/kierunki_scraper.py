@@ -1,85 +1,89 @@
-"""
-Moduł do pobierania danych o kierunkach studiów
-Autor: lifeoverthinker
-Data: 2025-04-08
-"""
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-import re
 import logging
-import requests
-from bs4 import BeautifulSoup
-from typing import List, Dict
+from utils import get_soup_from_url, normalize_text, full_url
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('UZ_Scraper.Kierunki')
 
 class KierunkiScraper:
-    """Klasa do pobierania danych o kierunkach studiów"""
+    def __init__(self, db):
+        self.db = db
+        self.start_url = "https://plan.uz.zgora.pl/"
 
-    BASE_URL = "https://plan.uz.zgora.pl"
-
-    def __init__(self):
-        self.session = requests.Session()
-
-    def get_kierunki(self) -> List[Dict[str, str]]:
+    def scrape_and_save(self):
         """
-        Pobiera listę kierunków studiów wraz z ich danymi
+        Scrapuje kierunki studiów i zapisuje je do bazy danych.
 
         Returns:
-            Lista słowników z danymi kierunków studiów
+            int: Liczba zaktualizowanych kierunków
         """
-        url = f"{self.BASE_URL}/grupy_lista_kierunkow.php"
-        logger.info(f"Pobieranie listy kierunków z {url}")
+        logger.info("Rozpoczynam scrapowanie kierunków studiów")
 
-        try:
-            response = self.session.get(url)
-            response.raise_for_status()  # Sprawdź czy nie ma błędu HTTP
+        kierunki_list = self.scrape_kierunki()
 
-            soup = BeautifulSoup(response.text, 'html.parser')
-            kierunki = []
+        # Zapis do bazy danych
+        count = 0
+        for kierunek in kierunki_list:
+            self.db.upsert_kierunek(kierunek)
+            count += 1
 
-            # Znajdujemy wszystkie elementy wydziałów (LI z klasą list-group-item)
-            wydzialy_elements = soup.select('LI.list-group-item')
+        logger.info("Zakończono scrapowanie kierunków. Zaktualizowano %s kierunków", count)
+        return count
 
-            for wydzial_element in wydzialy_elements:
-                # Pobierz nazwę wydziału
-                wydzial_nazwa = ""
-                # Próbujemy pobrać tekst z pierwszego elementu bold lub strong
-                bold_element = wydzial_element.find(['strong', 'b'])
-                if bold_element:
-                    wydzial_nazwa = bold_element.get_text(strip=True)
-                else:
-                    # Jeśli nie znaleziono, pobierz bezpośredni tekst elementu
-                    wydzial_nazwa = wydzial_element.get_text(strip=True).split('\n')[0].strip()
+    def scrape_kierunki(self):
+        """
+        Scrapuje dane o kierunkach studiów.
 
-                # Znajdź listę kierunków dla tego wydziału
-                for a_element in wydzial_element.select('a'):
-                    href = a_element.get('href', '')
-                    if 'grupy_lista_grup_kierunku.php' in href:
-                        nazwa_kierunku = a_element.text.strip()
-
-                        # Wyciągnij ID kierunku z URL
-                        match = re.search(r'ID=(\d+)', href)
-                        if match:
-                            kierunek_id = match.group(1)
-
-                            # Określ typ kierunku
-                            typ_kierunku = "standardowy"
-                            if "studia podyplomowe" in nazwa_kierunku.lower():
-                                typ_kierunku = "podyplomowe"
-                            elif "erasmus" in nazwa_kierunku.lower():
-                                typ_kierunku = "erasmus"
-
-                            kierunki.append({
-                                'nazwa_kierunku': nazwa_kierunku,
-                                'wydzial': wydzial_nazwa,
-                                'link_grupy': href,
-                                'kierunek_id': kierunek_id,
-                                'typ_kierunku': typ_kierunku
-                            })
-
-            logger.info(f"Znaleziono {len(kierunki)} kierunków")
-            return kierunki
-
-        except Exception as e:
-            logger.error(f"Błąd podczas pobierania kierunków: {str(e)}")
+        Returns:
+            Lista słowników z danymi kierunków
+        """
+        soup = get_soup_from_url(self.start_url)
+        if not soup:
+            logger.error("Nie udało się pobrać strony głównej planów UZ")
             return []
+
+        kierunki_data = []
+
+        # Znajdź listę wydziałów
+        wydzialy_options = soup.select('select[name="wydzial"] option')
+
+        for wydzial_option in wydzialy_options:
+            wydzial_value = wydzial_option.get('value')
+            wydzial_name = normalize_text(wydzial_option.text)
+
+            # Pomijamy opcję "wybierz wydział"
+            if not wydzial_value or wydzial_value == "0" or "wybierz" in wydzial_name.lower():
+                continue
+
+            logger.info("Przetwarzanie wydziału: %s", wydzial_name)
+
+            # Pobieramy kierunki dla tego wydziału
+            kierunki_url = "%s?wydzial=%s" % (self.start_url, wydzial_value)
+            kierunki_soup = get_soup_from_url(kierunki_url)
+
+            if not kierunki_soup:
+                logger.warning("Nie udało się pobrać listy kierunków dla wydziału: %s", wydzial_name)
+                continue
+
+            # Znajdź kierunki w odpowiedzi
+            kierunki_links = kierunki_soup.select('a[href*="grupy"]')
+
+            for link in kierunki_links:
+                kierunek_name = normalize_text(link.text)
+                # Upewniamy się, że używamy pełnego URL
+                href = link.get('href')
+                kierunek_link = full_url(href)
+
+                if not kierunek_name or "wybierz" in kierunek_name.lower():
+                    continue
+
+                kierunki_data.append({
+                    'nazwa_kierunku': kierunek_name,
+                    'wydzial': wydzial_name,
+                    'link_grupy': kierunek_link
+                })
+                logger.debug("Znaleziono kierunek: %s (%s)", kierunek_name, wydzial_name)
+
+        logger.info("Znaleziono łącznie %s kierunków", len(kierunki_data))
+        return kierunki_data

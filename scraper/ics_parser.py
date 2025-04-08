@@ -1,117 +1,118 @@
-"""
-Moduł do parsowania plików ICS
-Autor: lifeoverthinker
-Data: 2025-04-08
-"""
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-import re
 import logging
+import re
+from utils import make_request, format_datetime_for_db
 from datetime import datetime
-from typing import Dict, List
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('UZ_Scraper.ICS')
 
-class IcsParser:
-    """Klasa do parsowania plików ICS z planami zajęć"""
+class ICSParser:
+    def __init__(self):
+        pass
 
-    @staticmethod
-    def parse_ics_content(ics_content: str) -> List[Dict]:
+    def parse_ics_url(self, url):
         """
-        Parsuje zawartość pliku ICS i zwraca listę wydarzeń
+        Pobiera i parsuje plik ICS (iCalendar) z podanego URL.
 
         Args:
-            ics_content: Zawartość pliku ICS jako tekst
+            url: URL do pliku ICS
 
         Returns:
-            Lista wydarzeń wyekstrahowanych z pliku ICS
+            Lista słowników zawierających wydarzenia z kalendarza
+        """
+        logger.info("Pobieranie pliku ICS z: %s", url)
+
+        response = make_request(url)
+        if not response:
+            logger.error("Nie udało się pobrać pliku ICS z %s", url)
+            return []
+
+        ics_content = response.text
+        return self.parse_ics_content(ics_content)
+
+    def parse_ics_content(self, ics_content):
+        """
+        Parsuje zawartość pliku ICS (iCalendar).
+
+        Args:
+            ics_content: Zawartość pliku ICS
+
+        Returns:
+            Lista słowników zawierających wydarzenia z kalendarza
         """
         events = []
-        event = None
+        current_event = None
 
-        for line in ics_content.split('\n'):
+        lines = ics_content.splitlines()
+
+        for line in lines:
             line = line.strip()
 
-            if line == 'BEGIN:VEVENT':
-                event = {}
-            elif line == 'END:VEVENT':
-                if event:
-                    events.append(event)
-                event = None
-            elif event is not None:
-                if ':' in line:
-                    key, value = line.split(':', 1)
-                    if key == 'DTSTART':
-                        # Konwersja daty i czasu z formatu ICS na format czytelny
-                        try:
-                            dt = datetime.strptime(value, '%Y%m%dT%H%M%S')
-                            event['start_date'] = dt.strftime('%Y-%m-%d')
-                            event['start_time'] = dt.strftime('%H:%M')
-                        except ValueError:
-                            logger.error(f"Błąd parsowania daty: {value}")
-                    elif key == 'DTEND':
-                        try:
-                            dt = datetime.strptime(value, '%Y%m%dT%H%M%S')
-                            event['end_date'] = dt.strftime('%Y-%m-%d')
-                            event['end_time'] = dt.strftime('%H:%M')
-                        except ValueError:
-                            logger.error(f"Błąd parsowania daty: {value}")
-                    elif key == 'SUMMARY':
-                        # Parsowanie nazwy przedmiotu i nauczyciela
-                        summary_parts = value.split(':', 1)
-                        if len(summary_parts) > 1:
-                            przedmiot_z_typem = summary_parts[0].strip()
-                            nauczyciel = summary_parts[1].strip()
+            # Początek wydarzenia
+            if line == "BEGIN:VEVENT":
+                current_event = {}
 
-                            # Wydzielenie typu zajęć (W, Ć, L, itp.)
-                            przedmiot_match = re.match(r'(.*?)\s*\((.*?)\)', przedmiot_z_typem)
-                            if przedmiot_match:
-                                przedmiot = przedmiot_match.group(1).strip()
-                                typ_zajec = przedmiot_match.group(2).strip()
-                                event['przedmiot'] = przedmiot
-                                event['typ_zajec'] = typ_zajec
-                            else:
-                                event['przedmiot'] = przedmiot_z_typem
-                                event['typ_zajec'] = ""
+            # Koniec wydarzenia - dodajemy do listy
+            elif line == "END:VEVENT" and current_event:
+                events.append(current_event)
+                current_event = None
 
-                            # Wyciągnięcie danych nauczyciela
-                            event['nauczyciel'] = nauczyciel.replace('mgr ', '').replace('dr ', '').replace('prof. ', '').strip()
-                        else:
-                            event['przedmiot'] = value
-                    elif key == 'LOCATION':
-                        event['miejsce'] = value
-                    elif key == 'UID':
-                        # Wyciągnięcie identyfikatora wydarzenia
-                        event['uid'] = value
-                    elif key == 'CATEGORIES':
-                        # Dodatkowe informacje o typie zajęć
-                        event['kategoria'] = value
+            # Parsowanie właściwości wydarzenia
+            elif current_event is not None and ":" in line:
+                key, value = line.split(":", 1)
 
+                # Obsługa linii kontynuacji
+                if key.startswith(" ") and current_event:
+                    # Dodanie do poprzedniej wartości
+                    last_key = list(current_event.keys())[-1]
+                    current_event[last_key] += value
+                    continue
+
+                # Obsługa parametrów (np. DTSTART;TZID=...)
+                if ";" in key:
+                    key = key.split(";")[0]
+
+                # Konwersja kluczy
+                if key == "SUMMARY":
+                    current_event["summary"] = value
+                elif key == "LOCATION":
+                    current_event["location"] = value
+                elif key == "DESCRIPTION":
+                    current_event["description"] = value
+                elif key == "DTSTART":
+                    current_event["start"] = self.convert_ics_datetime(value)
+                elif key == "DTEND":
+                    current_event["end"] = self.convert_ics_datetime(value)
+
+        logger.info("Znaleziono %s wydarzeń w pliku ICS", len(events))
         return events
 
     @staticmethod
-    def format_event_for_db(event: Dict) -> Dict:
+    def convert_ics_datetime(ics_datetime):
         """
-        Formatuje wydarzenie z ICS do formatu używanego w bazie danych
+        Konwertuje format daty i czasu z ICS na format używany w bazie danych.
 
         Args:
-            event: Wydarzenie sparsowane z pliku ICS
+            ics_datetime: Data i czas w formacie ICS (np. 20220105T083000Z)
 
         Returns:
-            Wydarzenie sformatowane do zapisu w bazie danych
+            Data i czas w formacie PostgreSQL (np. 2022-01-05 08:30:00)
         """
-        formatted_event = {
-            'przedmiot': event.get('przedmiot', ''),
-            'rz': event.get('typ_zajec', event.get('kategoria', '')),
-            'miejsce': event.get('miejsce', ''),
-            'od': event.get('start_time', ''),
-            'do': event.get('end_time', ''),
-            'terminy': f"{event.get('start_date', '')} {event.get('start_time', '')}-{event.get('end_time', '')}"
-        }
+        # Usuwamy 'Z' z końca jeśli istnieje
+        if ics_datetime.endswith('Z'):
+            ics_datetime = ics_datetime[:-1]
 
-        # Dodaj nauczyciela jeśli jest dostępny
-        if 'nauczyciel' in event:
-            formatted_event['nauczyciel'] = {
-                'imie_nazwisko': event['nauczyciel']
-            }
+        # Format ICS: YYYYMMDDTHHMMSS
+        pattern = r'(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})'
+        match = re.match(pattern, ics_datetime)
 
-        return formatted_event
+        if match:
+            year, month, day, hour, minute, second = map(int, match.groups())
+            dt = datetime(year, month, day, hour, minute, second)
+            return format_datetime_for_db(dt)
+
+        # W przypadku błędu, zwracamy oryginalny string
+        logger.warning("Nie udało się sparsować daty ICS: %s", ics_datetime)
+        return ics_datetime

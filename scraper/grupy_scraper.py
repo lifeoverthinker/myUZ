@@ -1,84 +1,137 @@
-"""
-Moduł do pobierania danych o grupach studenckich
-Autor: lifeoverthinker
-Data: 2025-04-08
-"""
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-import re
 import logging
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime, UTC
-from typing import List, Dict
+import re
+from utils import get_soup_from_url, normalize_text, full_url
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('UZ_Scraper.Grupy')
 
 class GrupyScraper:
-    """Klasa do pobierania danych o grupach studenckich"""
+    def __init__(self, db):
+        self.db = db
 
-    BASE_URL = "https://plan.uz.zgora.pl"
-
-    def __init__(self):
-        self.session = requests.Session()
-        self.scrape_timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-
-    def get_grupy(self, kierunek_link: str) -> List[Dict[str, str]]:
+    def scrape_and_save(self):
         """
-        Pobiera listę grup dla danego kierunku
+        Scrapuje grupy dla wszystkich kierunków i zapisuje je do bazy danych.
+
+        Returns:
+            int: Liczba zaktualizowanych grup
+        """
+        logger.info("Rozpoczynam scrapowanie grup studenckich")
+
+        # Pobierz wszystkie kierunki z bazy danych
+        kierunki = self.db.get_all_kierunki()
+
+        total_count = 0
+        for kierunek in kierunki:
+            if not kierunek.get('link_grupy'):
+                logger.warning("Kierunek %s nie ma linku do grup", kierunek.get('nazwa_kierunku'))
+                continue
+
+            logger.info("Scrapowanie grup dla kierunku: %s", kierunek['nazwa_kierunku'])
+
+            grupy_list = self.scrape_grupy_for_kierunek(kierunek)
+
+            # Zapis do bazy danych
+            count = 0
+            for grupa in grupy_list:
+                self.db.upsert_grupa(grupa)
+                count += 1
+
+            logger.info("Zaktualizowano %s grup dla kierunku %s",
+                        count, kierunek['nazwa_kierunku'])
+            total_count += count
+
+        logger.info("Zakończono scrapowanie grup. Zaktualizowano łącznie %s grup", total_count)
+        return total_count
+
+    def scrape_grupy_for_kierunek(self, kierunek):
+        """
+        Scrapuje dane o grupach dla konkretnego kierunku.
 
         Args:
-            kierunek_link: Link do strony z grupami danego kierunku
+            kierunek: Słownik z danymi kierunku
 
         Returns:
             Lista słowników z danymi grup
         """
-        url = f"{self.BASE_URL}/{kierunek_link}"
-        logger.info(f"Pobieranie grup z {url}")
+        grupy_data = []
 
-        try:
-            response = self.session.get(url)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-            grupy = []
-            current_semestr = ""
-
-            # Szukaj informacji o semestrze
-            h3_elements = soup.select('h3')
-            if h3_elements:
-                current_semestr = h3_elements[0].text.strip()
-
-            # Szukaj linków do planów grup
-            for a_element in soup.select('a[href*="grupy_plan.php"]'):
-                link_href = a_element.get('href', '')
-                pelna_nazwa_grupy = a_element.text.strip()
-
-                # Wyodrębnij kod grupy (część przed pierwszą spacją)
-                match = re.match(r'^(\S+)', pelna_nazwa_grupy)
-                kod_grupy = match.group(1) if match else pelna_nazwa_grupy
-
-                # Określ tryb studiów
-                tryb = "stacjonarne"
-                if "niestacjonarne" in pelna_nazwa_grupy.lower():
-                    tryb = "niestacjonarne"
-
-                # Wyciągnij ID grupy
-                match = re.search(r'ID=(\d+)', link_href)
-                if match:
-                    grupa_id = match.group(1)
-                    grupy.append({
-                        'nazwa_grupy': pelna_nazwa_grupy,
-                        'kod_grupy': kod_grupy,
-                        'semestr': current_semestr,
-                        'tryb_studiow': tryb,
-                        'link_planu': link_href,
-                        'grupa_id': grupa_id,
-                        'data_aktualizacji': self.scrape_timestamp
-                    })
-
-            logger.info(f"Znaleziono {len(grupy)} grup dla kierunku {kierunek_link}")
-            return grupy
-
-        except Exception as e:
-            logger.error(f"Błąd podczas pobierania grup: {str(e)}")
+        soup = get_soup_from_url(kierunek['link_grupy'])
+        if not soup:
+            logger.error("Nie udało się pobrać strony grup dla kierunku: %s",
+                         kierunek['nazwa_kierunku'])
             return []
+
+        # Znajdź grupy w odpowiedzi
+        grupy_links = soup.select('a[href*="plan"]')
+
+        for link in grupy_links:
+            grupa_text = normalize_text(link.text)
+            plan_link = full_url(link.get('href'))
+
+            if not grupa_text or len(grupa_text) < 2:
+                continue
+
+            # Analizujemy tekst grupy, żeby wyciągnąć informacje
+            tryb = self.extract_tryb(grupa_text)
+            semestr = self.extract_semestr(grupa_text)
+            kod_grupy = self.extract_kod_grupy(grupa_text)
+
+            grupy_data.append({
+                'kierunek_id': kierunek['id'],
+                'tryb_studiow': tryb,
+                'semestr': semestr,
+                'kod_grupy': kod_grupy,
+                'link_planu': plan_link
+            })
+
+            logger.debug("Znaleziono grupę: %s", kod_grupy if kod_grupy else grupa_text)
+
+        logger.info("Znaleziono łącznie %s grup dla kierunku %s",
+                    len(grupy_data), kierunek['nazwa_kierunku'])
+        return grupy_data
+
+    @staticmethod
+    def extract_tryb(text):
+        """Wyciąga tryb studiów z tekstu grupy."""
+        tryby = {
+            'stacjonarne': ['stacjonarne', 'dzienne', 'stacjonarny'],
+            'niestacjonarne': ['niestacjonarne', 'zaoczne', 'niestacjonarny'],
+        }
+
+        text_lower = text.lower()
+        for tryb, keywords in tryby.items():
+            if any(keyword in text_lower for keyword in keywords):
+                return tryb
+
+        return None
+
+    @staticmethod
+    def extract_semestr(text):
+        """Wyciąga semestr z tekstu grupy."""
+        # Szukanie wzorca "sem. X" lub "X semestr"
+        sem_pattern = re.compile(r'sem\.?\s*(\d+)|\b(\d+)\s*semestr', re.IGNORECASE)
+        match = sem_pattern.search(text)
+
+        if match:
+            # Grupa 1 lub 2 zawiera numer semestru, w zależności od tego, który wzorzec zadziałał
+            semestr = match.group(1) if match.group(1) else match.group(2)
+            return "Semestr %s" % semestr
+
+        return None
+
+    @staticmethod
+    def extract_kod_grupy(text):
+        """Wyciąga kod grupy z tekstu grupy."""
+        # Szukanie wzorca "Grupa X" lub kodu grupy np. "42INF-ISP-..."
+        kod_pattern = re.compile(r'grupa\s+([A-Za-z0-9]+)|(\d+[A-Za-z]+-[A-Za-z]+-[\w-]+)', re.IGNORECASE)
+        match = kod_pattern.search(text)
+
+        if match:
+            kod = match.group(1) if match.group(1) else match.group(2)
+            return kod
+
+        # Jeśli nie znaleziono, zwracamy cały tekst jako kod grupy
+        return text

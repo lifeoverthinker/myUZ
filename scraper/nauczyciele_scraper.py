@@ -1,98 +1,126 @@
-"""
-Moduł do pobierania danych o nauczycielach
-Autor: lifeoverthinker
-Data: 2025-04-08
-"""
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-import re
 import logging
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime, UTC
-from typing import Dict
+import re
+from utils import get_soup_from_url, normalize_text, full_url
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('UZ_Scraper.Nauczyciele')
 
 class NauczycieleScraper:
-    """Klasa do pobierania informacji o nauczycielach"""
+    def __init__(self, db):
+        self.db = db
+        self.start_url = "https://plan.uz.zgora.pl/plan_nauczyciel.php"
 
-    BASE_URL = "https://plan.uz.zgora.pl"
-
-    def __init__(self):
-        self.session = requests.Session()
-        self.scrape_timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
-
-    def get_nauczyciel_info(self, nauczyciel_link: str) -> Dict[str, str]:
+    def scrape_and_save(self):
         """
-        Pobiera informacje o nauczycielu
-
-        Args:
-            nauczyciel_link: Link do profilu nauczyciela
+        Scrapuje dane o nauczycielach i zapisuje je do bazy danych.
 
         Returns:
-            Słownik z danymi nauczyciela
+            int: Liczba zaktualizowanych nauczycieli
         """
-        url = f"{self.BASE_URL}/{nauczyciel_link}"
-        logger.info(f"Pobieranie informacji o nauczycielu z {url}")
+        logger.info("Rozpoczynam scrapowanie nauczycieli")
 
+        nauczyciele_list = self.scrape_nauczyciele()
+
+        # Zapis do bazy danych
+        count = 0
+        for nauczyciel in nauczyciele_list:
+            self.db.upsert_nauczyciel(nauczyciel)
+            count += 1
+
+        logger.info("Zakończono scrapowanie nauczycieli. Zaktualizowano %s nauczycieli", count)
+        return count
+
+    def scrape_nauczyciele(self):
+        """
+        Scrapuje dane o nauczycielach.
+
+        Returns:
+            Lista słowników z danymi nauczycieli
+        """
+        # Najpierw pobieramy stronę z wyborem instytutu
+        soup = get_soup_from_url(self.start_url)
+        if not soup:
+            logger.error("Nie udało się pobrać strony z wyborem instytutu")
+            return []
+
+        nauczyciele_data = []
+
+        # Znajdź listę instytutów
+        instytuty_options = soup.select('select[name="instytut"] option')
+
+        for instytut_option in instytuty_options:
+            instytut_value = instytut_option.get('value')
+            instytut_name = normalize_text(instytut_option.text)
+
+            # Pomijamy opcję "wybierz instytut"
+            if not instytut_value or instytut_value == "0" or "wybierz" in instytut_name.lower():
+                continue
+
+            logger.info("Przetwarzanie instytutu: %s", instytut_name)
+
+            # Pobieramy nauczycieli dla tego instytutu
+            nauczyciele_url = "%s?instytut=%s" % (self.start_url, instytut_value)
+            nauczyciele_soup = get_soup_from_url(nauczyciele_url)
+
+            if not nauczyciele_soup:
+                logger.warning("Nie udało się pobrać listy nauczycieli dla instytutu: %s", instytut_name)
+                continue
+
+            # Znajdź nauczycieli w odpowiedzi
+            nauczyciele_links = nauczyciele_soup.select('a[href*="nazwisko="]')
+
+            for link in nauczyciele_links:
+                nauczyciel_name = normalize_text(link.text)
+                plan_link = full_url(link.get('href'))
+
+                if not nauczyciel_name:
+                    continue
+
+                # Próba wyciągnięcia emaila (może nie być dostępny)
+                email = self.extract_email(nauczyciel_name, plan_link)
+
+                nauczyciele_data.append({
+                    'imie_nazwisko': nauczyciel_name,
+                    'instytut': instytut_name,
+                    'email': email,
+                    'link_planu': plan_link
+                })
+                logger.debug("Znaleziono nauczyciela: %s (%s)", nauczyciel_name, instytut_name)
+
+        logger.info("Znaleziono łącznie %s nauczycieli", len(nauczyciele_data))
+        return nauczyciele_data
+
+    @staticmethod
+    def extract_email(name, plan_link):
+        """
+        Próbuje pobrać stronę planu nauczyciela i wyciągnąć email.
+        """
+        # Czasami email jest dostępny na stronie planu
+        soup = get_soup_from_url(plan_link)
+        if not soup:
+            return None
+
+        # Szukamy adresu email w treści strony
+        email_pattern = re.compile(r'[\w\.-]+@[\w\.-]+\.\w+')
+        page_text = soup.get_text()
+        match = email_pattern.search(page_text)
+
+        if match:
+            return match.group(0)
+
+        # Jeśli nie znaleziono, próbujemy zgadnąć na podstawie nazwiska
+        # (opcjonalnie - może nie działać dla wszystkich)
         try:
-            response = self.session.get(url)
-            response.raise_for_status()
+            # Rozdzielamy imię i nazwisko
+            parts = name.split()
+            if len(parts) >= 2:
+                surname = parts[-1].lower()
+                first_name_initial = parts[0][0].lower()
+                # Typowy format UZ: j.kowalski@uz.zgora.pl
+                return "%s.%s@uz.zgora.pl" % (first_name_initial, surname)
+        except Exception:
+            pass
 
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # Pobierz imię i nazwisko z nagłówka H2
-            imie_nazwisko = ""
-            h2_element = soup.find('h2')
-            if h2_element:
-                imie_nazwisko = h2_element.text.strip()
-
-            # Pobierz instytut z nagłówka H3
-            instytut = ""
-            h3_element = soup.find('h3')
-            if h3_element:
-                instytut = h3_element.text.strip()
-
-            # Pobierz email z linku mailto
-            email = ""
-            email_element = soup.find('a', href=lambda href_attr: href_attr and href_attr.startswith('mailto:'))
-            if email_element:
-                email = email_element.get('href', '').replace('mailto:', '')
-
-            # Pobierz link do ICS
-            ics_link = ""
-            dropdown_menu = soup.find('ul', class_='dropdown-menu')
-            if dropdown_menu:
-                for a_tag in dropdown_menu.find_all('a'):
-                    a_href = a_tag.get('href', '')
-                    if 'nauczyciel_ics.php' in a_href:
-                        ics_link = a_href
-                        break
-
-            # Wyciągnij ID nauczyciela z URL
-            nauczyciel_id = ""
-            match = re.search(r'ID=(\d+)', nauczyciel_link)
-            if match:
-                nauczyciel_id = match.group(1)
-
-            return {
-                'id': nauczyciel_id,
-                'imie_nazwisko': imie_nazwisko,
-                'instytut': instytut,
-                'email': email,
-                'link_ics': ics_link,
-                'link_planu': nauczyciel_link,
-                'data_aktualizacji': self.scrape_timestamp
-            }
-
-        except Exception as e:
-            logger.error(f"Błąd podczas pobierania informacji o nauczycielu: {str(e)}")
-            return {
-                'id': "",
-                'imie_nazwisko': "",
-                'instytut': "",
-                'email': "",
-                'link_ics': "",
-                'link_planu': nauczyciel_link,
-                'data_aktualizacji': self.scrape_timestamp
-            }
+        return None
