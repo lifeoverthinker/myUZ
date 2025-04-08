@@ -1,67 +1,117 @@
-from datetime import datetime
+"""
+Moduł do parsowania plików ICS
+Autor: lifeoverthinker
+Data: 2025-04-08
+"""
+
 import re
-from typing import List, Dict, Any
+import logging
+from datetime import datetime
+from typing import Dict, List
 
-class ICSParser:
-    def __init__(self):
-        pass
+logger = logging.getLogger(__name__)
 
-    def parse_ics_content(self, ics_content: str) -> List[Dict[str, Any]]:
-        """Parsuje zawartość pliku ICS i zwraca listę wydarzeń"""
+class IcsParser:
+    """Klasa do parsowania plików ICS z planami zajęć"""
+
+    @staticmethod
+    def parse_ics_content(ics_content: str) -> List[Dict]:
+        """
+        Parsuje zawartość pliku ICS i zwraca listę wydarzeń
+
+        Args:
+            ics_content: Zawartość pliku ICS jako tekst
+
+        Returns:
+            Lista wydarzeń wyekstrahowanych z pliku ICS
+        """
         events = []
-        current_event = None
+        event = None
 
-        for line in ics_content.splitlines():
+        for line in ics_content.split('\n'):
             line = line.strip()
 
-            if line == "BEGIN:VEVENT":
-                current_event = {}
-            elif line == "END:VEVENT" and current_event:
-                events.append(current_event)
-                current_event = None
-            elif current_event is not None:
-                if ":" in line:
-                    key, value = line.split(":", 1)
+            if line == 'BEGIN:VEVENT':
+                event = {}
+            elif line == 'END:VEVENT':
+                if event:
+                    events.append(event)
+                event = None
+            elif event is not None:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    if key == 'DTSTART':
+                        # Konwersja daty i czasu z formatu ICS na format czytelny
+                        try:
+                            dt = datetime.strptime(value, '%Y%m%dT%H%M%S')
+                            event['start_date'] = dt.strftime('%Y-%m-%d')
+                            event['start_time'] = dt.strftime('%H:%M')
+                        except ValueError:
+                            logger.error(f"Błąd parsowania daty: {value}")
+                    elif key == 'DTEND':
+                        try:
+                            dt = datetime.strptime(value, '%Y%m%dT%H%M%S')
+                            event['end_date'] = dt.strftime('%Y-%m-%d')
+                            event['end_time'] = dt.strftime('%H:%M')
+                        except ValueError:
+                            logger.error(f"Błąd parsowania daty: {value}")
+                    elif key == 'SUMMARY':
+                        # Parsowanie nazwy przedmiotu i nauczyciela
+                        summary_parts = value.split(':', 1)
+                        if len(summary_parts) > 1:
+                            przedmiot_z_typem = summary_parts[0].strip()
+                            nauczyciel = summary_parts[1].strip()
 
-                    # Przetwarzanie daty i czasu
-                    if key == "DTSTART":
-                        # Format: 20250402T104000
-                        dt = datetime.strptime(value, "%Y%m%dT%H%M%S")
-                        current_event["od"] = dt.strftime("%H:%M:%S")
-                        current_event["data"] = dt.strftime("%Y-%m-%d")
-                    elif key == "DTEND":
-                        dt = datetime.strptime(value, "%Y%m%dT%H%M%S")
-                        current_event["do"] = dt.strftime("%H:%M:%S")
-                    elif key == "UID":
-                        current_event["uid"] = value
-                    elif key == "SUMMARY":
-                        # Przykład: "Animacja obrazu graficznego (Ć): mgr Joanna Fuczko"
-                        self._parse_summary(current_event, value)
-                    elif key == "LOCATION":
-                        current_event["miejsce"] = value
-                    elif key == "CATEGORIES":
-                        current_event["typ_zajec"] = value
+                            # Wydzielenie typu zajęć (W, Ć, L, itp.)
+                            przedmiot_match = re.match(r'(.*?)\s*\((.*?)\)', przedmiot_z_typem)
+                            if przedmiot_match:
+                                przedmiot = przedmiot_match.group(1).strip()
+                                typ_zajec = przedmiot_match.group(2).strip()
+                                event['przedmiot'] = przedmiot
+                                event['typ_zajec'] = typ_zajec
+                            else:
+                                event['przedmiot'] = przedmiot_z_typem
+                                event['typ_zajec'] = ""
+
+                            # Wyciągnięcie danych nauczyciela
+                            event['nauczyciel'] = nauczyciel.replace('mgr ', '').replace('dr ', '').replace('prof. ', '').strip()
+                        else:
+                            event['przedmiot'] = value
+                    elif key == 'LOCATION':
+                        event['miejsce'] = value
+                    elif key == 'UID':
+                        # Wyciągnięcie identyfikatora wydarzenia
+                        event['uid'] = value
+                    elif key == 'CATEGORIES':
+                        # Dodatkowe informacje o typie zajęć
+                        event['kategoria'] = value
 
         return events
 
     @staticmethod
-    def _parse_summary(event: Dict[str, Any], summary: str) -> None:
-        """Parsuje pole SUMMARY i wypełnia odpowiednie pola w event"""
-        # Przykład: "Animacja obrazu graficznego (Ć): mgr Joanna Fuczko"
+    def format_event_for_db(event: Dict) -> Dict:
+        """
+        Formatuje wydarzenie z ICS do formatu używanego w bazie danych
 
-        # Próbuje wyodrębnić przedmiot, typ zajęć i prowadzącego
-        match = re.match(r"(.*?)\s*(\([^)]+\))?\s*:?\s*(.*)", summary)
+        Args:
+            event: Wydarzenie sparsowane z pliku ICS
 
-        if match:
-            przedmiot, typ_zajec, prowadzacy = match.groups()
+        Returns:
+            Wydarzenie sformatowane do zapisu w bazie danych
+        """
+        formatted_event = {
+            'przedmiot': event.get('przedmiot', ''),
+            'rz': event.get('typ_zajec', event.get('kategoria', '')),
+            'miejsce': event.get('miejsce', ''),
+            'od': event.get('start_time', ''),
+            'do': event.get('end_time', ''),
+            'terminy': f"{event.get('start_date', '')} {event.get('start_time', '')}-{event.get('end_time', '')}"
+        }
 
-            event["przedmiot"] = przedmiot.strip() if przedmiot else ""
+        # Dodaj nauczyciela jeśli jest dostępny
+        if 'nauczyciel' in event:
+            formatted_event['nauczyciel'] = {
+                'imie_nazwisko': event['nauczyciel']
+            }
 
-            if typ_zajec:
-                # Usunięcie nawiasów
-                event["typ_zajec"] = typ_zajec.strip("() ")
-
-            event["prowadzacy"] = prowadzacy.strip() if prowadzacy else ""
-        else:
-            # Jeśli nie udało się sparsować, zachowaj oryginalne SUMMARY
-            event["przedmiot"] = summary
+        return formatted_event

@@ -1,407 +1,407 @@
-import logging
-from typing import Dict, List, Any
-from supabase import create_client, Client
-import time
+"""
+Moduł do komunikacji z bazą danych PostgreSQL
+Autor: lifeoverthinker
+Data: 2025-04-08
+"""
 
-logging.basicConfig(level=logging.INFO)
+import logging
+import uuid
+import datetime
+from typing import Dict, List, Optional, Any, Tuple
+
+import psycopg2
+from psycopg2.extras import DictCursor, RealDictCursor
+import os
+from dotenv import load_dotenv
+
+# Załaduj zmienne środowiskowe z pliku .env
+load_dotenv()
+
+# Konfiguracja loggera
 logger = logging.getLogger(__name__)
 
-class SupabaseClient:
-    def __init__(self, url: str, key: str):
-        """Inicjalizacja klienta Supabase"""
-        self.client: Client = create_client(url, key)
-        logger.info("Zainicjalizowano klienta Supabase")
+class Database:
+    def __init__(self, database_url: str = None):
+        """
+        Inicjalizuje połączenie z bazą danych
 
-        # Słowniki do przechowywania mapowań ID
-        self._kierunki_map = {}  # link_grupy -> UUID
-        self._grupy_map = {}     # link_planu -> UUID
-        self._nauczyciele_map = {}  # imie_nazwisko -> UUID
+        Args:
+            database_url: URL połączenia do bazy danych (opcjonalny, domyślnie z env)
+        """
+        # Jeśli URL nie podany, spróbuj z env
+        if not database_url:
+            database_url = os.getenv("DATABASE_URL")
 
-        # Inicjalnie pobierz istniejące rekordy do cache
-        self._load_existing_records()
+        if not database_url:
+            raise ValueError("Brak URL do bazy danych. Ustaw DATABASE_URL w zmiennych środowiskowych lub podaj w konstruktorze.")
 
-        # Sprawdź czy wymagane kolumny istnieją
-        self._check_and_update_schema()
+        self.database_url = database_url
+        self.conn = None
+        self.cursor = None
 
-    def _load_existing_records(self):
-        """Ładuje istniejące rekordy do pamięci podręcznej, aby uniknąć duplikatów"""
+    def connect(self) -> bool:
+        """
+        Nawiązuje połączenie z bazą danych
+
+        Returns:
+            True jeśli udało się połączyć, False w przeciwnym razie
+        """
         try:
-            # Pobierz mapowania kierunków
-            logger.info("Ładowanie istniejących kierunków do cache...")
-            kierunki_result = self.client.table('kierunki').select('id, link_grupy').execute()
-            for k in kierunki_result.data:
-                if 'link_grupy' in k and k['link_grupy']:
-                    self._kierunki_map[k['link_grupy']] = k['id']
-
-            # Pobierz mapowania grup
-            logger.info("Ładowanie istniejących grup do cache...")
-            grupy_result = self.client.table('grupy').select('id, link_planu').execute()
-            for g in grupy_result.data:
-                if 'link_planu' in g and g['link_planu']:
-                    self._grupy_map[g['link_planu']] = g['id']
-
-            # Pobierz mapowania nauczycieli
-            logger.info("Ładowanie istniejących nauczycieli do cache...")
-            nauczyciele_result = self.client.table('nauczyciele').select('id, imie_nazwisko').execute()
-            for n in nauczyciele_result.data:
-                if 'imie_nazwisko' in n and n['imie_nazwisko']:
-                    self._nauczyciele_map[n['imie_nazwisko']] = n['id']
-
-            logger.info(f"Załadowano do cache: {len(self._kierunki_map)} kierunków, {len(self._grupy_map)} grup, {len(self._nauczyciele_map)} nauczycieli")
+            self.conn = psycopg2.connect(self.database_url)
+            self.cursor = self.conn.cursor(cursor_factory=RealDictCursor)
+            return True
         except Exception as e:
-            logger.error(f"Błąd podczas ładowania istniejących rekordów: {str(e)}")
+            logger.error(f"Błąd podczas łączenia z bazą danych: {str(e)}")
+            return False
 
-    def _check_and_update_schema(self):
-        """Sprawdza czy wymagane kolumny istnieją i dodaje brakujące"""
+    def disconnect(self) -> None:
+        """Zamyka połączenie z bazą danych"""
+        if self.cursor:
+            self.cursor.close()
+        if self.conn:
+            self.conn.close()
+
+    def execute_query(self, query: str, params: tuple = None, commit: bool = False) -> Optional[List[Dict]]:
+        """
+        Wykonuje zapytanie SQL
+
+        Args:
+            query: Zapytanie SQL
+            params: Parametry zapytania
+            commit: Czy wykonać commit po zapytaniu
+
+        Returns:
+            Lista wyników lub None w przypadku błędu/braku wyników
+        """
         try:
-            # Sprawdź plany_grup
-            plany_grup_columns = self._get_table_columns('plany_grup')
+            if not self.conn or self.conn.closed:
+                self.connect()
 
-            if 'podgrupa' not in plany_grup_columns:
-                logger.info("Dodawanie kolumny 'podgrupa' do tabeli plany_grup")
-                self._execute_sql("ALTER TABLE plany_grup ADD COLUMN podgrupa VARCHAR(50);")
+            self.cursor.execute(query, params)
 
-            if 'rodzaj_zajec' not in plany_grup_columns:
-                logger.info("Dodawanie kolumny 'rodzaj_zajec' do tabeli plany_grup")
-                self._execute_sql("ALTER TABLE plany_grup ADD COLUMN rodzaj_zajec VARCHAR(500);")
+            if commit:
+                self.conn.commit()
+                return None
 
-            # Sprawdź plany_nauczycieli
-            plany_naucz_columns = self._get_table_columns('plany_nauczycieli')
+            try:
+                results = self.cursor.fetchall()
+                return [dict(row) for row in results]
+            except psycopg2.ProgrammingError:
+                # No results to fetch
+                return []
 
-            if 'podgrupa' not in plany_naucz_columns:
-                logger.info("Dodawanie kolumny 'podgrupa' do tabeli plany_nauczycieli")
-                self._execute_sql("ALTER TABLE plany_nauczycieli ADD COLUMN podgrupa VARCHAR(50);")
-
-            if 'rodzaj_zajec' not in plany_naucz_columns:
-                logger.info("Dodawanie kolumny 'rodzaj_zajec' do tabeli plany_nauczycieli")
-                self._execute_sql("ALTER TABLE plany_nauczycieli ADD COLUMN rodzaj_zajec VARCHAR(500);")
-
-            logger.info("Sprawdzanie schematu bazy danych zakończone")
         except Exception as e:
-            logger.error(f"Błąd podczas sprawdzania/aktualizacji schematu: {str(e)}")
+            logger.error(f"Błąd podczas wykonywania zapytania: {str(e)}")
+            if commit:
+                self.conn.rollback()
+            return None
 
-    def _get_table_columns(self, table_name: str) -> List[str]:
-        """Pobiera listę nazw kolumn dla danej tabeli"""
+    def get_kierunki(self) -> List[Dict]:
+        """
+        Pobiera wszystkie kierunki z bazy danych
+
+        Returns:
+            Lista kierunków
+        """
+        query = "SELECT * FROM kierunki"
+        return self.execute_query(query) or []
+
+    def get_kierunek_by_id(self, kierunek_id: str) -> Optional[Dict]:
+        """
+        Pobiera kierunek o podanym ID
+
+        Args:
+            kierunek_id: ID kierunku
+
+        Returns:
+            Dane kierunku lub None jeśli nie znaleziono
+        """
+        query = "SELECT * FROM kierunki WHERE id = %s"
+        results = self.execute_query(query, (kierunek_id,))
+        return results[0] if results else None
+
+    def get_grupy_by_kierunek(self, kierunek_id: str) -> List[Dict]:
+        """
+        Pobiera grupy dla danego kierunku
+
+        Args:
+            kierunek_id: ID kierunku
+
+        Returns:
+            Lista grup
+        """
+        query = "SELECT * FROM grupy WHERE kierunek_id = %s"
+        return self.execute_query(query, (kierunek_id,)) or []
+
+    def get_nauczyciele(self) -> List[Dict]:
+        """
+        Pobiera wszystkich nauczycieli
+
+        Returns:
+            Lista nauczycieli
+        """
+        query = "SELECT * FROM nauczyciele"
+        return self.execute_query(query) or []
+
+    def get_events_for_group(self, grupa_id: str) -> List[Dict]:
+        """
+        Pobiera wydarzenia dla danej grupy
+
+        Args:
+            grupa_id: ID grupy
+
+        Returns:
+            Lista wydarzeń
+        """
         try:
-            result = self._execute_sql(f"""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = '{table_name}' AND table_schema = 'public'
-            """)
-            return [row['column_name'] for row in result['data']]
+            # Zapytanie uwzględniające strukturę bazy danych
+            query = """
+            SELECT pg.id, pg.od, pg.do_, pg.przedmiot, pg.rz, pg.miejsce, pg.terminy, 
+                   n.imie_nazwisko, n.instytut, n.email, n.link_planu
+            FROM plany_grup pg
+            LEFT JOIN nauczyciele n ON pg.nauczyciel_id = n.id
+            WHERE pg.grupa_id = %s
+            """
+            events = self.execute_query(query, (grupa_id,))
+            return events or []
         except Exception as e:
-            logger.error(f"Błąd podczas pobierania kolumn tabeli {table_name}: {str(e)}")
+            logger.error(f"Błąd podczas pobierania wydarzeń dla grupy: {e}")
             return []
 
-    def _execute_sql(self, sql: str) -> Dict[str, Any]:
-        """Wykonuje zapytanie SQL"""
-        return self.client.rpc('exec_sql', {'sql': sql}).execute()
+    def get_existing_events(self, grupa_id: str = None, nauczyciel_id: str = None) -> List[Dict]:
+        """
+        Pobiera istniejące wydarzenia dla grupy lub nauczyciela
 
-    def _truncate_value(self, value: str, max_length: int = 255) -> str:
-        """Przycina wartość do określonej maksymalnej długości"""
-        if not value or not isinstance(value, str):
-            return value
-        if len(value) > max_length:
-            logger.warning(f"Przycinanie zbyt długiej wartości: '{value[:20]}...' ({len(value)} znaków)")
-            return value[:max_length]
-        return value
+        Args:
+            grupa_id: ID grupy (opcjonalne)
+            nauczyciel_id: ID nauczyciela (opcjonalne)
 
-    def nauczyciel_exists(self, nazwa: str) -> bool:
-        """Sprawdza czy nauczyciel już istnieje w bazie danych"""
-        # Najpierw sprawdź cache
-        if nazwa in self._nauczyciele_map:
+        Returns:
+            Lista wydarzeń
+        """
+        try:
+            if grupa_id:
+                query = "SELECT * FROM plany_grup WHERE grupa_id = %s"
+                params = (grupa_id,)
+            elif nauczyciel_id:
+                query = "SELECT * FROM plany_nauczycieli WHERE nauczyciel_id = %s"
+                params = (nauczyciel_id,)
+            else:
+                return []
+
+            events = self.execute_query(query, params)
+            return events or []
+        except Exception as e:
+            logger.error(f"Błąd podczas pobierania istniejących wydarzeń: {e}")
+            return []
+
+    def save_events_for_group(self, grupa_id: str, events: List[Dict]) -> bool:
+        """
+        Zapisuje wydarzenia dla grupy
+
+        Args:
+            grupa_id: ID grupy
+            events: Lista wydarzeń do zapisania
+
+        Returns:
+            True jeśli zapisano pomyślnie, False w przeciwnym razie
+        """
+        if not events:
             return True
 
-        # Jeśli nie ma w cache, sprawdź bazę
-        result = self.client.table('nauczyciele').select('id').eq('imie_nazwisko', nazwa).execute()
-        exists = len(result.data) > 0
-
-        # Jeśli znaleziono, dodaj do cache
-        if exists and result.data[0]['id']:
-            self._nauczyciele_map[nazwa] = result.data[0]['id']
-
-        return exists
-
-    def upsert_kierunki(self, kierunki: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Wstawia lub aktualizuje kierunki w bazie danych"""
-        start_time = time.time()
-        logger.info(f"Wstawianie/aktualizacja {len(kierunki)} kierunków")
-
-        # Liczniki statystyk
-        count_inserts = 0
-        count_updates = 0
-
-        # Przygotuj dane do wstawienia (tylko kolumny istniejące w tabeli)
-        prepared_data = []
-        for kierunek in kierunki:
-            # Sprawdź czy kierunek już istnieje na podstawie link_grupy
-            link_grupy = kierunek['link_grupy']
-
-            # Przygotuj dane do wstawienia (tylko kolumny istniejące w tabeli)
-            kierunek_data = {
-                'nazwa_kierunku': self._truncate_value(kierunek['nazwa_kierunku']),
-                'wydzial': self._truncate_value(kierunek['wydzial']),
-                'link_grupy': self._truncate_value(link_grupy)
-            }
-
-            # Jeśli kierunek już istnieje w cache, użyj jego id
-            if link_grupy in self._kierunki_map:
-                kierunek_data['id'] = self._kierunki_map[link_grupy]
-                count_updates += 1
-            else:
-                # Dodatkowe sprawdzenie w bazie
-                existing = self.client.table('kierunki').select('id').eq('link_grupy', link_grupy).execute()
-                if existing.data and len(existing.data) > 0:
-                    kierunek_data['id'] = existing.data[0]['id']
-                    self._kierunki_map[link_grupy] = existing.data[0]['id']  # Dodaj do cache
-                    count_updates += 1
-                else:
-                    count_inserts += 1
-
-            prepared_data.append(kierunek_data)
-
-        if not prepared_data:
-            logger.info("Brak kierunków do zaktualizowania")
-            return []
-
-        # Wstaw lub zaktualizuj dane
-        result = self.client.table('kierunki').upsert(prepared_data).execute()
-
-        # Zaktualizuj cache z nowymi UUID dla nowo wstawionych rekordów
-        for item in result.data:
-            self._kierunki_map[item['link_grupy']] = item['id']
-
-        elapsed_time = time.time() - start_time
-        logger.info(f"Operacja zakończona w {elapsed_time:.2f}s. Wstawiono: {count_inserts}, Zaktualizowano: {count_updates} kierunków")
-        return result.data
-
-    def upsert_grupy(self, grupy: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Wstawia lub aktualizuje grupy w bazie danych"""
-        start_time = time.time()
-        logger.info(f"Wstawianie/aktualizacja {len(grupy)} grup")
-
-        # Liczniki statystyk
-        count_inserts = 0
-        count_updates = 0
-
-        # Przygotuj dane do wstawienia
-        prepared_data = []
-        for grupa in grupy:
-            # Sprawdź czy grupa już istnieje na podstawie link_planu
-            link_planu = grupa['link_planu']
-
-            # Znajdź UUID kierunku na podstawie original_kierunek_id
-            kierunek_id = None
-            if 'original_kierunek_id' in grupa:
-                # Najpierw sprawdź w cache
-                for cache_link, cache_id in self._kierunki_map.items():
-                    if f"ID={grupa['original_kierunek_id']}" in cache_link:
-                        kierunek_id = cache_id
-                        break
-
-                # Jeśli nie znaleziono w cache, sprawdź w bazie
-                if not kierunek_id:
-                    kierunki_result = self.client.table('kierunki').select('id, link_grupy').execute()
-                    for k in kierunki_result.data:
-                        if f"ID={grupa['original_kierunek_id']}" in k['link_grupy']:
-                            kierunek_id = k['id']
-                            break
-
-            # Przygotuj dane do wstawienia (tylko kolumny istniejące w tabeli)
-            grupa_data = {
-                'nazwa_grupy': self._truncate_value(grupa['nazwa_grupy']),
-                'kod_grupy': self._truncate_value(grupa.get('kod_grupy', '')),
-                'semestr': self._truncate_value(grupa['semestr']),
-                'tryb_studiow': self._truncate_value(grupa['tryb_studiow']),
-                'link_planu': self._truncate_value(link_planu)
-            }
-
-            # Dodaj referencję do kierunku jeśli znaleziono
-            if kierunek_id:
-                grupa_data['kierunek_id'] = kierunek_id
-
-            # Jeśli grupa już istnieje w cache, użyj jej id
-            if link_planu in self._grupy_map:
-                grupa_data['id'] = self._grupy_map[link_planu]
-                count_updates += 1
-            else:
-                # Dodatkowe sprawdzenie w bazie
-                existing = self.client.table('grupy').select('id').eq('link_planu', link_planu).execute()
-                if existing.data and len(existing.data) > 0:
-                    grupa_data['id'] = existing.data[0]['id']
-                    self._grupy_map[link_planu] = existing.data[0]['id']  # Dodaj do cache
-                    count_updates += 1
-                else:
-                    count_inserts += 1
-
-            prepared_data.append(grupa_data)
-
-        if not prepared_data:
-            logger.info("Brak grup do zaktualizowania")
-            return []
-
-        # Wstaw lub zaktualizuj dane
-        result = self.client.table('grupy').upsert(prepared_data).execute()
-
-        # Zaktualizuj cache z nowymi UUID dla nowo wstawionych rekordów
-        for item in result.data:
-            self._grupy_map[item['link_planu']] = item['id']
-
-        elapsed_time = time.time() - start_time
-        logger.info(f"Operacja zakończona w {elapsed_time:.2f}s. Wstawiono: {count_inserts}, Zaktualizowano: {count_updates} grup")
-        return result.data
-
-    def upsert_nauczyciele(self, nauczyciele: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Wstawia lub aktualizuje nauczycieli w bazie danych"""
-        start_time = time.time()
-        logger.info(f"Wstawianie/aktualizacja {len(nauczyciele)} nauczycieli")
-
-        # Liczniki statystyk
-        count_inserts = 0
-        count_updates = 0
-
-        prepared_data = []
-        for nauczyciel in nauczyciele:
-            # Sprawdź czy nauczyciel już istnieje po imieniu i nazwisku
-            imie_nazwisko = nauczyciel['imie_nazwisko']
-
-            # Przygotuj dane do wstawienia (tylko kolumny istniejące w tabeli)
-            nauczyciel_data = {
-                'imie_nazwisko': self._truncate_value(imie_nazwisko),
-                'instytut': self._truncate_value(nauczyciel['instytut']),
-                'email': self._truncate_value(nauczyciel['email']),
-                'link_planu': self._truncate_value(nauczyciel.get('link_ics', ''))
-            }
-
-            # Jeśli nauczyciel już istnieje w cache, użyj jego id
-            if imie_nazwisko in self._nauczyciele_map:
-                nauczyciel_data['id'] = self._nauczyciele_map[imie_nazwisko]
-                count_updates += 1
-            else:
-                # Dodatkowe sprawdzenie w bazie
-                existing = self.client.table('nauczyciele').select('id').eq('imie_nazwisko', imie_nazwisko).execute()
-                if existing.data and len(existing.data) > 0:
-                    nauczyciel_data['id'] = existing.data[0]['id']
-                    self._nauczyciele_map[imie_nazwisko] = existing.data[0]['id']  # Dodaj do cache
-                    count_updates += 1
-                else:
-                    count_inserts += 1
-
-            prepared_data.append(nauczyciel_data)
-
-        if not prepared_data:
-            logger.info("Brak nauczycieli do zaktualizowania")
-            return []
-
-        # Wstaw lub zaktualizuj dane
-        result = self.client.table('nauczyciele').upsert(prepared_data).execute()
-
-        # Zaktualizuj cache z nowymi UUID dla nowo wstawionych rekordów
-        for item in result.data:
-            self._nauczyciele_map[item['imie_nazwisko']] = item['id']
-
-        elapsed_time = time.time() - start_time
-        logger.info(f"Operacja zakończona w {elapsed_time:.2f}s. Wstawiono: {count_inserts}, Zaktualizowano: {count_updates} nauczycieli")
-        return result.data
-
-    def upsert_plany_grup(self, grupa_link: str, wydarzenia: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Wstawia lub aktualizuje plan zajęć grupy"""
-        start_time = time.time()
-        logger.info(f"Wstawianie/aktualizacja planu zajęć dla grupy {grupa_link}")
-
-        # Liczniki statystyk
-        count_inserts = 0
-        count_updates = 0
-
-        # Znajdź UUID grupy na podstawie link_planu
-        grupa_uuid = None
-
-        # Najpierw sprawdź w cache
-        if grupa_link in self._grupy_map:
-            grupa_uuid = self._grupy_map[grupa_link]
-        else:
-            # Jeśli nie ma w cache, sprawdź w bazie
-            grupa_result = self.client.table('grupy').select('id').eq('link_planu', grupa_link).execute()
-            if grupa_result.data and len(grupa_result.data) > 0:
-                grupa_uuid = grupa_result.data[0]['id']
-                # Dodaj do cache
-                self._grupy_map[grupa_link] = grupa_uuid
-
-        if not grupa_uuid:
-            logger.warning(f"Nie znaleziono grupy o linku {grupa_link}")
-            return []
-
-        # Pobierz istniejące wydarzenia dla grupy
-        existing_events = {}
         try:
-            result = self.client.table('plany_grup').select('id, od, przedmiot, podgrupa').eq('grupa_id', grupa_uuid).execute()
-            for event in result.data:
-                # Utwórz klucz składający się z godziny, przedmiotu i podgrupy (jeśli jest)
-                key = f"{event.get('od', '')}__{event.get('przedmiot', '')}__{event.get('podgrupa', '')}"
-                existing_events[key] = event['id']
-        except Exception as e:
-            logger.error(f"Błąd podczas pobierania istniejących wydarzeń: {str(e)}")
+            existing_events = self.get_existing_events(grupa_id=grupa_id)
+            if existing_events:
+                # Usunięcie istniejących wydarzeń
+                self.execute_query("DELETE FROM plany_grup WHERE grupa_id = %s", (grupa_id,), commit=True)
 
-        # Przygotuj dane do wstawienia
-        prepared_data = []
-        for wydarzenie in wydarzenia:
-            # Stwórz nowy obiekt z wszystkimi wymaganymi polami
-            wydarzenie_copy = {
-                'grupa_id': grupa_uuid,
-                'link_ics': self._truncate_value(wydarzenie.get('link_ics', '')),
-                'od': wydarzenie.get('od', None),
-                'do_': wydarzenie.get('do', None),
-                'przedmiot': self._truncate_value(wydarzenie.get('przedmiot', '')),
-                'rz': self._truncate_value(wydarzenie.get('typ_zajec', '')),
-                'miejsce': self._truncate_value(wydarzenie.get('miejsce', '')),
-                'terminy': self._truncate_value(wydarzenie.get('terminy', ''), 1000),
-                'nauczyciel_id': None
-            }
+            for event in events:
+                nauczyciel_id = self.get_or_create_nauczyciel(event.get('nauczyciel', {}))
 
-            # Sprawdź czy mamy dodatkowe pola
-            if 'rodzaj_zajec' in wydarzenie or 'typ_zajec_pelny' in wydarzenie:
-                wydarzenie_copy['rodzaj_zajec'] = self._truncate_value(
-                    wydarzenie.get('rodzaj_zajec', wydarzenie.get('typ_zajec_pelny', '')), 500
+                query = """
+                INSERT INTO plany_grup (id, grupa_id, link_ics, nauczyciel_id, od, do_, przedmiot, rz, miejsce, terminy)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                params = (
+                    str(uuid.uuid4()),
+                    grupa_id,
+                    event.get('link_ics'),
+                    nauczyciel_id,
+                    event.get('od'),
+                    event.get('do'),
+                    event.get('przedmiot'),
+                    event.get('rz'),
+                    event.get('miejsce'),
+                    event.get('terminy')
                 )
+                self.execute_query(query, params, commit=True)
 
-            if 'podgrupa' in wydarzenie:
-                wydarzenie_copy['podgrupa'] = self._truncate_value(wydarzenie.get('podgrupa', ''), 50)
+            return True
+        except Exception as e:
+            logger.error(f"Błąd podczas zapisywania wydarzeń dla grupy: {e}")
+            return False
 
-            # Znajdź nauczyciela po imieniu i nazwisku
-            if 'prowadzacy' in wydarzenie and wydarzenie['prowadzacy']:
-                prowadzacy = wydarzenie['prowadzacy']
+    def save_events_for_nauczyciel(self, nauczyciel_id: str, events: List[Dict]) -> bool:
+        """
+        Zapisuje wydarzenia dla nauczyciela
 
-                # Sprawdź w cache
-                if prowadzacy in self._nauczyciele_map:
-                    wydarzenie_copy['nauczyciel_id'] = self._nauczyciele_map[prowadzacy]
-                else:
-                    # Jeśli nie ma w cache, sprawdź w bazie
-                    nauczyciel_result = self.client.table('nauczyciele').select('id').ilike('imie_nazwisko', f"%{prowadzacy}%").execute()
-                    if nauczyciel_result.data and len(nauczyciel_result.data) > 0:
-                        wydarzenie_copy['nauczyciel_id'] = nauczyciel_result.data[0]['id']
-                        # Dodaj do cache
-                        self._nauczyciele_map[prowadzacy] = nauczyciel_result.data[0]['id']
+        Args:
+            nauczyciel_id: ID nauczyciela
+            events: Lista wydarzeń do zapisania
 
-            # Sprawdź czy wydarzenie już istnieje
-            if wydarzenie_copy['od'] and wydarzenie_copy['przedmiot']:
-                # Utwórz klucz do sprawdzenia w istniejących wydarzeniach
-                event_key = f"{wydarzenie_copy['od']}__{wydarzenie_copy['przedmiot']}__{wydarzenie_copy.get('podgrupa', '')}"
+        Returns:
+            True jeśli zapisano pomyślnie, False w przeciwnym razie
+        """
+        if not events:
+            return True
 
-                if event_key in existing_events:
-                    wydarzenie_copy['id'] = existing_events[event_key]
-                    count_updates += 1
-                else:
-                    count_inserts += 1
+        try:
+            existing_events = self.get_existing_events(nauczyciel_id=nauczyciel_id)
+            if existing_events:
+                # Usunięcie istniejących wydarzeń
+                self.execute_query("DELETE FROM plany_nauczycieli WHERE nauczyciel_id = %s", (nauczyciel_id,), commit=True)
 
-            prepared_data.append(wydarzenie_copy)
+            for event in events:
+                query = """
+                INSERT INTO plany_nauczycieli (id, nauczyciel_id, link_ics, od, do_, przedmiot, rz, grupy, miejsce, terminy)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                params = (
+                    str(uuid.uuid4()),
+                    nauczyciel_id,
+                    event.get('link_ics'),
+                    event.get('od'),
+                    event.get('do'),
+                    event.get('przedmiot'),
+                    event.get('rz'),
+                    event.get('grupy'),
+                    event.get('miejsce'),
+                    event.get('terminy')
+                )
+                self.execute_query(query, params, commit=True)
 
-        if not prepared_data:
-            logger.info(f"Brak wydarzeń do zaktualizowania dla grupy {grupa_link}")
-            return []
+            return True
+        except Exception as e:
+            logger.error(f"Błąd podczas zapisywania wydarzeń dla nauczyciela: {e}")
+            return False
 
-        # Wstaw lub zaktualizuj dane
-        result = self.client.table('plany_grup').upsert(prepared_data).execute()
+    def get_or_create_nauczyciel(self, nauczyciel_data: Dict) -> Optional[str]:
+        """
+        Pobiera lub tworzy nauczyciela
 
-        elapsed_time = time.time() - start_time
-        logger.info(f"Operacja zakończona w {elapsed_time:.2f}s. Wstawiono: {count_inserts}, Zaktualizowano: {count_updates} wydarzeń")
-        return result.data
+        Args:
+            nauczyciel_data: Dane nauczyciela
+
+        Returns:
+            ID nauczyciela lub None w przypadku błędu
+        """
+        if not nauczyciel_data or not nauczyciel_data.get('imie_nazwisko'):
+            return None
+
+        try:
+            # Sprawdzenie czy nauczyciel już istnieje
+            query = "SELECT id FROM nauczyciele WHERE imie_nazwisko = %s"
+            results = self.execute_query(query, (nauczyciel_data.get('imie_nazwisko'),))
+
+            if results:
+                return results[0]['id']
+            else:
+                # Stworzenie nowego nauczyciela
+                nauczyciel_id = str(uuid.uuid4())
+                query = """
+                INSERT INTO nauczyciele (id, imie_nazwisko, instytut, email, link_planu)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+                params = (
+                    nauczyciel_id,
+                    nauczyciel_data.get('imie_nazwisko'),
+                    nauczyciel_data.get('instytut'),
+                    nauczyciel_data.get('email'),
+                    nauczyciel_data.get('link_planu')
+                )
+                self.execute_query(query, params, commit=True)
+                return nauczyciel_id
+        except Exception as e:
+            logger.error(f"Błąd podczas tworzenia/pobierania nauczyciela: {e}")
+            return None
+
+    def save_kierunek(self, nazwa_kierunku: str, wydzial: str, link_grupy: str) -> Optional[str]:
+        """
+        Zapisuje kierunek do bazy danych
+
+        Args:
+            nazwa_kierunku: Nazwa kierunku
+            wydzial: Nazwa wydziału
+            link_grupy: Link do listy grup
+
+        Returns:
+            ID kierunku lub None w przypadku błędu
+        """
+        try:
+            kierunek_id = str(uuid.uuid4())
+            query = """
+            INSERT INTO kierunki (id, nazwa_kierunku, wydzial, link_grupy)
+            VALUES (%s, %s, %s, %s)
+            """
+            params = (kierunek_id, nazwa_kierunku, wydzial, link_grupy)
+            self.execute_query(query, params, commit=True)
+            return kierunek_id
+        except Exception as e:
+            logger.error(f"Błąd podczas zapisywania kierunku: {e}")
+            return None
+
+    def save_grupa(self, kod_grupy: str, nazwa_grupy: str, semestr: str, tryb_studiow: str, kierunek_id: str, link_planu: str) -> Optional[str]:
+        """
+        Zapisuje grupę do bazy danych
+
+        Args:
+            kod_grupy: Kod grupy
+            nazwa_grupy: Nazwa grupy
+            semestr: Semestr
+            tryb_studiow: Tryb studiów
+            kierunek_id: ID kierunku
+            link_planu: Link do planu zajęć
+
+        Returns:
+            ID grupy lub None w przypadku błędu
+        """
+        try:
+            grupa_id = str(uuid.uuid4())
+            query = """
+            INSERT INTO grupy (id, kod_grupy, nazwa_grupy, semestr, tryb_studiow, kierunek_id, link_planu)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+            params = (grupa_id, kod_grupy, nazwa_grupy, semestr, tryb_studiow, kierunek_id, link_planu)
+            self.execute_query(query, params, commit=True)
+            return grupa_id
+        except Exception as e:
+            logger.error(f"Błąd podczas zapisywania grupy: {e}")
+            return None
+
+    def get_grupa_by_id(self, grupa_id: str) -> Optional[Dict]:
+        """
+        Pobiera grupę o podanym ID
+
+        Args:
+            grupa_id: ID grupy
+
+        Returns:
+            Dane grupy lub None jeśli nie znaleziono
+        """
+        query = "SELECT * FROM grupy WHERE id = %s"
+        results = self.execute_query(query, (grupa_id,))
+        return results[0] if results else None
+
+    def get_nauczyciel_by_id(self, nauczyciel_id: str) -> Optional[Dict]:
+        """
+        Pobiera nauczyciela o podanym ID
+
+        Args:
+            nauczyciel_id: ID nauczyciela
+
+        Returns:
+            Dane nauczyciela lub None jeśli nie znaleziono
+        """
+        query = "SELECT * FROM nauczyciele WHERE id = %s"
+        results = self.execute_query(query, (nauczyciel_id,))
+        return results[0] if results else None
