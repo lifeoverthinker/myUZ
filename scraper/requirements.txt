@@ -1,4 +1,18 @@
-requests>=2.25.1
-beautifulsoup4>=4.9.3
-supabase>=1.0.0
+# Database
+psycopg2-binary>=2.9.5
+psycopg2-pool>=1.1
+
+# Web Scraping
+requests>=2.28.0
+beautifulsoup4>=4.11.0
+lxml>=4.9.1
+
+# Utility
 python-dateutil>=2.8.2
+pytz>=2022.1
+
+# Optional - Supabase integration
+supabase>=0.7.1  # If you're using Supabase Python client
+
+# Testing
+pytest>=7.0.0  # Only needed if you have tests
