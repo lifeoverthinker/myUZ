@@ -1,126 +1,135 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import logging
 import re
-from utils import get_soup_from_url, normalize_text, full_url
+from bs4 import BeautifulSoup
+import requests
+import threading
+import sys
+
+# Kompatybilność z Python 2.7 i Python 3.x
+if sys.version_info[0] >= 3:
+    import queue
+else:
+    import Queue as queue
 
 logger = logging.getLogger('UZ_Scraper.Nauczyciele')
 
 class NauczycieleScraper:
-    def __init__(self, db):
+    def __init__(self, db, base_url):
         self.db = db
-        self.start_url = "https://plan.uz.zgora.pl/plan_nauczyciel.php"
-
-    def scrape_and_save(self):
-        """
-        Scrapuje dane o nauczycielach i zapisuje je do bazy danych.
-
-        Returns:
-            int: Liczba zaktualizowanych nauczycieli
-        """
-        logger.info("Rozpoczynam scrapowanie nauczycieli")
-
-        nauczyciele_list = self.scrape_nauczyciele()
-
-        # Zapis do bazy danych
-        count = 0
-        for nauczyciel in nauczyciele_list:
-            self.db.upsert_nauczyciel(nauczyciel)
-            count += 1
-
-        logger.info("Zakończono scrapowanie nauczycieli. Zaktualizowano %s nauczycieli", count)
-        return count
-
-    def scrape_nauczyciele(self):
-        """
-        Scrapuje dane o nauczycielach.
-
-        Returns:
-            Lista słowników z danymi nauczycieli
-        """
-        # Najpierw pobieramy stronę z wyborem instytutu
-        soup = get_soup_from_url(self.start_url)
-        if not soup:
-            logger.error("Nie udało się pobrać strony z wyborem instytutu")
-            return []
-
-        nauczyciele_data = []
-
-        # Znajdź listę instytutów
-        instytuty_options = soup.select('select[name="instytut"] option')
-
-        for instytut_option in instytuty_options:
-            instytut_value = instytut_option.get('value')
-            instytut_name = normalize_text(instytut_option.text)
-
-            # Pomijamy opcję "wybierz instytut"
-            if not instytut_value or instytut_value == "0" or "wybierz" in instytut_name.lower():
-                continue
-
-            logger.info("Przetwarzanie instytutu: %s", instytut_name)
-
-            # Pobieramy nauczycieli dla tego instytutu
-            nauczyciele_url = "%s?instytut=%s" % (self.start_url, instytut_value)
-            nauczyciele_soup = get_soup_from_url(nauczyciele_url)
-
-            if not nauczyciele_soup:
-                logger.warning("Nie udało się pobrać listy nauczycieli dla instytutu: %s", instytut_name)
-                continue
-
-            # Znajdź nauczycieli w odpowiedzi
-            nauczyciele_links = nauczyciele_soup.select('a[href*="nazwisko="]')
-
-            for link in nauczyciele_links:
-                nauczyciel_name = normalize_text(link.text)
-                plan_link = full_url(link.get('href'))
-
-                if not nauczyciel_name:
-                    continue
-
-                # Próba wyciągnięcia emaila (może nie być dostępny)
-                email = self.extract_email(nauczyciel_name, plan_link)
-
-                nauczyciele_data.append({
-                    'imie_nazwisko': nauczyciel_name,
-                    'instytut': instytut_name,
-                    'email': email,
-                    'link_planu': plan_link
-                })
-                logger.debug("Znaleziono nauczyciela: %s (%s)", nauczyciel_name, instytut_name)
-
-        logger.info("Znaleziono łącznie %s nauczycieli", len(nauczyciele_data))
-        return nauczyciele_data
+        self.base_url = base_url
+        self.session = requests.Session()
+        self.task_queue = queue.Queue()  # Zmieniona nazwa dla klarowności
+        self.lock = threading.Lock()
+        self.total_updated = 0
+        self.max_threads = 8
 
     @staticmethod
-    def extract_email(name, plan_link):
-        """
-        Próbuje pobrać stronę planu nauczyciela i wyciągnąć email.
-        """
-        # Czasami email jest dostępny na stronie planu
-        soup = get_soup_from_url(plan_link)
-        if not soup:
-            return None
+    def fix_url(url):
+        """Poprawia nieprawidłowy URL."""
+        if isinstance(url, str) and url.startswith('/'):  # Dodane sprawdzenie typu
+            url = url[1:]
+        return url
 
-        # Szukamy adresu email w treści strony
-        email_pattern = re.compile(r'[\w\.-]+@[\w\.-]+\.\w+')
-        page_text = soup.get_text()
-        match = email_pattern.search(page_text)
-
-        if match:
-            return match.group(0)
-
-        # Jeśli nie znaleziono, próbujemy zgadnąć na podstawie nazwiska
-        # (opcjonalnie - może nie działać dla wszystkich)
+    def scrape_and_save(self):
+        """Scrapuje nauczycieli i zapisuje ich do bazy danych."""
         try:
-            # Rozdzielamy imię i nazwisko
-            parts = name.split()
-            if len(parts) >= 2:
-                surname = parts[-1].lower()
-                first_name_initial = parts[0][0].lower()
-                # Typowy format UZ: j.kowalski@uz.zgora.pl
-                return "%s.%s@uz.zgora.pl" % (first_name_initial, surname)
-        except Exception:
-            pass
+            logger.info("Rozpoczęto scrapowanie nauczycieli")
 
-        return None
+            # URL do strony z listą nauczycieli
+            nauczyciele_url = "{}/nauczyciele_lista.php".format(self.base_url)
+            response = self.session.get(nauczyciele_url)
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            # Wyszukanie tabeli z listą nauczycieli
+            table = soup.select_one('table.table')
+            if not table:
+                logger.warning("Nie znaleziono tabeli z nauczycielami")
+                return 0
+
+            # Wyszukanie wierszy tabeli (każdy wiersz to jeden nauczyciel)
+            rows = table.select('tr')
+
+            # Pierwszy wiersz to nagłówek, więc pomijamy go
+            for row in rows[1:]:
+                cols = row.select('td')
+                if len(cols) < 2:
+                    continue
+
+                # Pobieranie linku do planu nauczyciela
+                link = cols[0].select_one('a')
+                if not link:
+                    continue
+
+                # Dodaj nauczyciela do kolejki
+                self.task_queue.put((link.text.strip(), link.get('href'), cols[1].text.strip()))
+
+            logger.info("Znaleziono {} nauczycieli do scrapowania".format(self.task_queue.qsize()))
+
+            # Uruchom wątki
+            threads = []
+            queue_size = self.task_queue.qsize()
+            for i in range(min(self.max_threads, queue_size)):
+                t = threading.Thread(target=self.worker)
+                t.daemon = True
+                threads.append(t)
+                t.start()
+
+            # Czekaj na zakończenie wszystkich wątków
+            self.task_queue.join()
+
+            logger.info("Zakończono scrapowanie nauczycieli. Zaktualizowano {} nauczycieli".format(self.total_updated))
+            return self.total_updated
+        except Exception as e:
+            logger.error("Błąd podczas scrapowania nauczycieli: {}".format(str(e)))
+            raise e
+
+    def worker(self):
+        """Funkcja pracownika dla wątku."""
+        while True:
+            try:
+                imie_nazwisko, href, instytut = self.task_queue.get(block=False)  # non-blocking get
+                result = self.scrape_nauczyciel(imie_nazwisko, href, instytut)
+                if result:
+                    with self.lock:
+                        self.total_updated += 1
+                self.task_queue.task_done()
+            except queue.Empty:  # Zmienione z Queue.Empty
+                break
+            except Exception as e:
+                logger.error("Błąd w wątku scrapowania nauczycieli: {}".format(str(e)))
+                self.task_queue.task_done()
+
+    def scrape_nauczyciel(self, imie_nazwisko, href, instytut):
+        """Scrapuje informacje o pojedynczym nauczycielu."""
+        try:
+            link_planu = href
+            if isinstance(link_planu, str) and not link_planu.startswith('http'):  # Dodane sprawdzenie typu
+                if link_planu.startswith('/'):
+                    link_planu = "{}{}".format(self.base_url, link_planu)
+                else:
+                    link_planu = "{}/{}".format(self.base_url, NauczycieleScraper.fix_url(link_planu))
+
+            # Pobieranie strony nauczyciela
+            response = self.session.get(link_planu)
+            soup = BeautifulSoup(response.content, 'html.parser')
+
+            # Pobieranie adresu email (jeśli dostępny)
+            email = None
+            email_link = soup.select_one('a[href^="mailto:"]')
+            if email_link:
+                email = email_link.get('href').replace('mailto:', '')
+
+            # Tworzenie wpisu nauczyciela
+            nauczyciel = {
+                "imie_nazwisko": imie_nazwisko,
+                "instytut": instytut,
+                "email": email,
+                "link_planu": link_planu
+            }
+
+            # Zapis do bazy danych
+            self.db.upsert_nauczyciel(nauczyciel)
+            return True
+        except Exception as e:
+            logger.error("Błąd podczas scrapowania nauczyciela {}: {}".format(imie_nazwisko, str(e)))
+            return False

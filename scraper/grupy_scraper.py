@@ -1,137 +1,144 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import logging
 import re
-from utils import get_soup_from_url, normalize_text, full_url
+from bs4 import BeautifulSoup
+import requests
+import threading
+import sys
+
+# Kompatybilność z Python 2.7 i Python 3.x
+if sys.version_info[0] >= 3:
+    import queue
+else:
+    import Queue as queue
 
 logger = logging.getLogger('UZ_Scraper.Grupy')
 
 class GrupyScraper:
-    def __init__(self, db):
+    def __init__(self, db, base_url):
         self.db = db
+        self.base_url = base_url
+        self.session = requests.Session()
+        self.task_queue = queue.Queue()  # Zmieniona nazwa dla klarowności
+        self.lock = threading.Lock()
+        self.total_updated = 0
+        self.max_threads = 8
+
+    @staticmethod
+    def fix_url(url):
+        """Poprawia nieprawidłowy URL."""
+        if isinstance(url, str) and url.startswith('/'):  # Dodane sprawdzenie typu
+            url = url[1:]
+            logger.warning("Naprawiono nieprawidłowy URL: {}".format(url))
+        return url
 
     def scrape_and_save(self):
         """
-        Scrapuje grupy dla wszystkich kierunków i zapisuje je do bazy danych.
-
-        Returns:
-            int: Liczba zaktualizowanych grup
+        Scrapuje grupy i zapisuje je do bazy danych.
+        Zwraca liczbę zaktualizowanych grup.
         """
-        logger.info("Rozpoczynam scrapowanie grup studenckich")
+        try:
+            self.total_updated = 0
+            kierunki = self.db.get_kierunki()
 
-        # Pobierz wszystkie kierunki z bazy danych
-        kierunki = self.db.get_all_kierunki()
+            if not kierunki:
+                logger.warning("Nie znaleziono żadnych kierunków w bazie danych")
+                return 0
 
-        total_count = 0
-        for kierunek in kierunki:
-            if not kierunek.get('link_grupy'):
-                logger.warning("Kierunek %s nie ma linku do grup", kierunek.get('nazwa_kierunku'))
-                continue
+            # Dodaj kierunki do kolejki
+            for kierunek in kierunki:
+                if kierunek.get('link_grupy'):
+                    self.task_queue.put(kierunek)
 
-            logger.info("Scrapowanie grup dla kierunku: %s", kierunek['nazwa_kierunku'])
+            # Uruchom wątki
+            threads = []
+            for i in range(min(self.max_threads, len(kierunki))):
+                t = threading.Thread(target=self.worker)
+                t.daemon = True
+                threads.append(t)
+                t.start()
 
-            grupy_list = self.scrape_grupy_for_kierunek(kierunek)
+            # Czekaj na zakończenie wszystkich wątków
+            self.task_queue.join()
 
-            # Zapis do bazy danych
-            count = 0
-            for grupa in grupy_list:
-                self.db.upsert_grupa(grupa)
-                count += 1
+            logger.info("Zakończono scrapowanie grup. Zaktualizowano {} grup".format(self.total_updated))
+            return self.total_updated
+        except Exception as e:
+            logger.error("Błąd podczas scrapowania grup: {}".format(str(e)))
+            raise e
 
-            logger.info("Zaktualizowano %s grup dla kierunku %s",
-                        count, kierunek['nazwa_kierunku'])
-            total_count += count
+    def worker(self):
+        """Funkcja pracownika dla wątku."""
+        while True:
+            try:
+                kierunek = self.task_queue.get(block=False)  # non-blocking get
+                self.scrape_kierunek(kierunek)
+                self.task_queue.task_done()
+            except queue.Empty:  # Zmienione z Queue.Empty
+                break
+            except Exception as e:
+                logger.error("Błąd w wątku scrapowania grup: {}".format(str(e)))
+                self.task_queue.task_done()
 
-        logger.info("Zakończono scrapowanie grup. Zaktualizowano łącznie %s grup", total_count)
-        return total_count
+    def scrape_kierunek(self, kierunek):
+        """Scrapuje grupy dla jednego kierunku."""
+        logger.info("Scrapowanie grup dla kierunku: {}".format(kierunek['nazwa_kierunku']))
 
-    def scrape_grupy_for_kierunek(self, kierunek):
-        """
-        Scrapuje dane o grupach dla konkretnego kierunku.
+        link_grupy = kierunek['link_grupy']
+        if isinstance(link_grupy, str) and not link_grupy.startswith('http'):  # Dodane sprawdzenie typu
+            link_grupy = self.fix_url(link_grupy)
+            if not link_grupy.startswith('http'):
+                link_grupy = "{}/{}".format(self.base_url, link_grupy)
 
-        Args:
-            kierunek: Słownik z danymi kierunku
+        response = self.session.get(link_grupy)
+        soup = BeautifulSoup(response.content, 'html.parser')
 
-        Returns:
-            Lista słowników z danymi grup
-        """
-        grupy_data = []
+        grupy_links = soup.select('table.table a')
+        logger.info("Znaleziono łącznie {} grup dla kierunku {}".format(len(grupy_links), kierunek['nazwa_kierunku']))
 
-        soup = get_soup_from_url(kierunek['link_grupy'])
-        if not soup:
-            logger.error("Nie udało się pobrać strony grup dla kierunku: %s",
-                         kierunek['nazwa_kierunku'])
-            return []
-
-        # Znajdź grupy w odpowiedzi
-        grupy_links = soup.select('a[href*="plan"]')
-
+        kierunek_updated = 0
         for link in grupy_links:
-            grupa_text = normalize_text(link.text)
-            plan_link = full_url(link.get('href'))
+            nazwa_grupy = link.text.strip()
+            # Wyciągamy tylko krótki kod grupy (przed pierwszą spacją)
+            kod_grupy = nazwa_grupy.split(" ", 1)[0]
 
-            if not grupa_text or len(grupa_text) < 2:
-                continue
+            href = link.get('href')
+            if isinstance(href, str) and not href.startswith('http'):  # Dodane sprawdzenie typu
+                if href.startswith('/'):
+                    href = "{}{}".format(self.base_url, href)
+                else:
+                    href = "{}/{}".format(self.base_url, href)
 
-            # Analizujemy tekst grupy, żeby wyciągnąć informacje
-            tryb = self.extract_tryb(grupa_text)
-            semestr = self.extract_semestr(grupa_text)
-            kod_grupy = self.extract_kod_grupy(grupa_text)
+            # Parsowanie strony grupy, aby pobrać dodatkowe informacje
+            grupa_response = self.session.get(href)
+            grupa_soup = BeautifulSoup(grupa_response.content, 'html.parser')
 
-            grupy_data.append({
-                'kierunek_id': kierunek['id'],
-                'tryb_studiow': tryb,
-                'semestr': semestr,
-                'kod_grupy': kod_grupy,
-                'link_planu': plan_link
-            })
+            # Pobieranie informacji o semestrze
+            h3_text = ""
+            h3_tag = grupa_soup.find('h3')
+            if h3_tag:
+                h3_text = h3_tag.text.strip()
 
-            logger.debug("Znaleziono grupę: %s", kod_grupy if kod_grupy else grupa_text)
+            # Wyciąganie informacji o trybie studiów
+            tryb_match = re.search(r'(stacjonarne|niestacjonarne)', h3_text)
+            tryb_studiow = tryb_match.group(1) if tryb_match else None
 
-        logger.info("Znaleziono łącznie %s grup dla kierunku %s",
-                    len(grupy_data), kierunek['nazwa_kierunku'])
-        return grupy_data
+            # Wyciąganie informacji o semestrze
+            semestr_match = re.search(r'semestr\s+(\w+)\s+(\d{4}/\d{4})', h3_text)
+            semestr = "{} {}".format(semestr_match.group(1), semestr_match.group(2)) if semestr_match else None
 
-    @staticmethod
-    def extract_tryb(text):
-        """Wyciąga tryb studiów z tekstu grupy."""
-        tryby = {
-            'stacjonarne': ['stacjonarne', 'dzienne', 'stacjonarny'],
-            'niestacjonarne': ['niestacjonarne', 'zaoczne', 'niestacjonarny'],
-        }
+            # Przygotowanie danych grupy - tylko z krótkim kodem
+            grupa = {
+                "kod_grupy": kod_grupy,  # Tylko krótki kod, np. "11AW-SP"
+                "kierunek_id": kierunek['id'],
+                "link_planu": href,
+                "tryb_studiow": tryb_studiow,
+                "semestr": semestr
+            }
 
-        text_lower = text.lower()
-        for tryb, keywords in tryby.items():
-            if any(keyword in text_lower for keyword in keywords):
-                return tryb
+            # Zapisywanie danych grupy
+            self.db.upsert_grupa(grupa)
+            kierunek_updated += 1
 
-        return None
-
-    @staticmethod
-    def extract_semestr(text):
-        """Wyciąga semestr z tekstu grupy."""
-        # Szukanie wzorca "sem. X" lub "X semestr"
-        sem_pattern = re.compile(r'sem\.?\s*(\d+)|\b(\d+)\s*semestr', re.IGNORECASE)
-        match = sem_pattern.search(text)
-
-        if match:
-            # Grupa 1 lub 2 zawiera numer semestru, w zależności od tego, który wzorzec zadziałał
-            semestr = match.group(1) if match.group(1) else match.group(2)
-            return "Semestr %s" % semestr
-
-        return None
-
-    @staticmethod
-    def extract_kod_grupy(text):
-        """Wyciąga kod grupy z tekstu grupy."""
-        # Szukanie wzorca "Grupa X" lub kodu grupy np. "42INF-ISP-..."
-        kod_pattern = re.compile(r'grupa\s+([A-Za-z0-9]+)|(\d+[A-Za-z]+-[A-Za-z]+-[\w-]+)', re.IGNORECASE)
-        match = kod_pattern.search(text)
-
-        if match:
-            kod = match.group(1) if match.group(1) else match.group(2)
-            return kod
-
-        # Jeśli nie znaleziono, zwracamy cały tekst jako kod grupy
-        return text
+        # Aktualizacja licznika globalnego
+        with self.lock:
+            self.total_updated += kierunek_updated

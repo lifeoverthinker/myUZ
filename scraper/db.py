@@ -1,290 +1,768 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-import os
 import logging
-import json
-import uuid
-import time
-from datetime import datetime
+import psycopg2
+import psycopg2.extras
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+import threading
 
 logger = logging.getLogger('UZ_Scraper.DB')
 
-class MockSupabase:
-    """Klasa symulująca działanie Supabase Client dla trybu testowego."""
-
-    def __init__(self):
-        self.data = {
-            'kierunki': [],
-            'grupy': [],
-            'nauczyciele': [],
-            'zajecia': [],
-            'zajecia_grupy': [],
-            'zajecia_nauczyciele': []
+class DB:
+    def __init__(self, host, dbname, user, password):
+        """Inicjalizuje połączenie z bazą danych."""
+        self.connection_params = {
+            'host': host,
+            'dbname': dbname,
+            'user': user,
+            'password': password
         }
-        logger.info("Utworzono symulowaną bazę danych Supabase")
+        # Główne połączenie dla wątku głównego
+        self.conn = psycopg2.connect(**self.connection_params)
+        self.conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        self.cursor = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        # Słownik do przechowywania połączeń dla poszczególnych wątków
+        self.thread_connections = {}
+        self.lock = threading.Lock()
+        logger.info("Połączono z bazą danych")
 
-    def table(self, table_name):
-        """Zwraca symulowany obiekt tabeli."""
-        return MockTable(self, table_name)
-
-class MockTable:
-    """Klasa symulująca tabelę Supabase."""
-
-    def __init__(self, client, table_name):
-        self.client = client
-        self.table_name = table_name
-        self._filters = []
-        self._select_columns = '*'
-
-    def select(self, columns):
-        """Symuluje wybór kolumn."""
-        self._select_columns = columns
-        return self
-
-    def eq(self, column, value):
-        """Symuluje filtrowanie po równości."""
-        self._filters.append((column, value))
-        return self
-
-    def execute(self):
-        """Symuluje wykonanie zapytania."""
-        result = []
-
-        for item in self.client.data.get(self.table_name, []):
-            # Sprawdzanie filtrów
-            matches = True
-            for column, value in self._filters:
-                if item.get(column) != value:
-                    matches = False
-                    break
-
-            if matches:
-                result.append(item)
-
-        return MockResponse(result)
-
-    def insert(self, data):
-        """Symuluje wstawianie danych."""
-        data_copy = data.copy()
-
-        # Dodaj ID jeśli nie istnieje
-        if 'id' not in data_copy:
-            data_copy['id'] = str(uuid.uuid4())
-
-        self.client.data.setdefault(self.table_name, []).append(data_copy)
-        logger.debug("Symulacja: Dodano rekord do tabeli %s", self.table_name)
-        return MockResponse([data_copy])
-
-    def update(self, data):
-        """Symuluje aktualizację danych."""
-        return self.insert(data)  # W trybie symulacji po prostu dodajemy dane
-
-class MockResponse:
-    """Klasa symulująca odpowiedź z Supabase."""
-
-    def __init__(self, data):
-        self.data = data
-
-class Database:
-    def __init__(self):
-        """Inicjalizacja połączenia z bazą Supabase lub tworzenie symulacji."""
-        self.url = os.environ.get("SUPABASE_URL")
-        self.key = os.environ.get("SUPABASE_KEY")
-        self.service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-
-        # Sprawdzamy, czy działamy w trybie GitHub Actions (zmienne środowiskowe są ustawione)
-        if self.url and (self.key or self.service_role_key):
-            # Rzeczywiste połączenie z Supabase
-            try:
-                from supabase import create_client
-                if self.service_role_key:
-                    logger.info("Łączenie z bazą Supabase używając Service Role Key")
-                    self.supabase = create_client(self.url, self.service_role_key)
-                else:
-                    logger.info("Łączenie z bazą Supabase używając standardowego klucza")
-                    self.supabase = create_client(self.url, self.key)
-
-                self._test_mode = False
-                logger.info("Połączono z bazą Supabase")
-            except ImportError:
-                logger.error("Nie znaleziono modułu supabase. Zainstaluj go używając: pip install supabase")
-                raise
-        else:
-            # Tryb testowy/symulacyjny - używamy lokalnej symulacji bazy danych
-            logger.warning(
-                "Zmienne środowiskowe SUPABASE_URL lub SUPABASE_KEY nie są ustawione. "
-                "Uruchamiam w trybie testowym z symulowaną bazą danych."
-            )
-            self.supabase = MockSupabase()
-            self._test_mode = True
-            logger.info("Uruchomiono w trybie testowym. Dane NIE będą zapisywane w rzeczywistej bazie.")
+    def get_connection(self):
+        """Zwraca połączenie dla aktualnego wątku lub tworzy nowe."""
+        thread_id = threading.get_ident()
+        with self.lock:
+            if thread_id not in self.thread_connections:
+                conn = psycopg2.connect(**self.connection_params)
+                conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                self.thread_connections[thread_id] = (conn, cursor)
+                logger.debug("Utworzono nowe połączenie dla wątku {}".format(thread_id))
+            return self.thread_connections[thread_id]
 
     def close(self):
-        """Zamknięcie połączenia z bazą danych."""
-        if self._test_mode:
-            # W trybie testowym zapisujemy dane do pliku dla celów debugowania
-            logger.info("Tryb testowy: Symulowana baza danych zostanie zamknięta.")
-            try:
-                with open('test_db_dump.json', 'w') as f:
-                    json.dump(self.supabase.data, f, indent=2)
-                logger.info("Zapisano symulowane dane do pliku test_db_dump.json dla analizy.")
-            except Exception as e:
-                logger.warning("Nie udało się zapisać danych testowych: %s", str(e))
-        else:
-            # Supabase client nie ma metody close, ale możemy zresetować zmienne
-            self.supabase = None
-            logger.info("Zamknięto połączenie z bazą Supabase")
+        """Zamyka wszystkie połączenia z bazą danych."""
+        # Zamknij główne połączenie
+        if self.conn:
+            self.cursor.close()
+            self.conn.close()
 
-    # KIERUNKI
-    def get_all_kierunki(self):
+        # Zamknij połączenia wątków
+        with self.lock:
+            for thread_id, (conn, cursor) in self.thread_connections.items():
+                cursor.close()
+                conn.close()
+            self.thread_connections.clear()
+
+        logger.info("Zamknięto wszystkie połączenia z bazą danych")
+
+    # ======= METODY DLA KIERUNKÓW =======
+
+    def get_kierunki(self):
         """Pobiera wszystkie kierunki z bazy danych."""
-        response = self.supabase.table('kierunki').select('*').execute()
-        return response.data
+        query = "SELECT * FROM kierunki"
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
 
-    def get_kierunek_by_nazwa(self, nazwa):
-        """Pobiera kierunek po nazwie."""
-        response = self.supabase.table('kierunki').select('*').eq('nazwa_kierunku', nazwa).execute()
-        if response.data:
-            return response.data[0]
-        return None
+    def get_kierunek_by_id(self, kierunek_id):
+        """Pobiera kierunek po ID."""
+        query = "SELECT * FROM kierunki WHERE id = %s"
+        self.cursor.execute(query, (kierunek_id,))
+        result = self.cursor.fetchone()
+        return dict(result) if result else None
 
     def upsert_kierunek(self, kierunek):
-        """Wstawia lub aktualizuje kierunek."""
-        existing = self.get_kierunek_by_nazwa(kierunek['nazwa_kierunku'])
-        if existing:
-            response = self.supabase.table('kierunki').update(kierunek).eq('id', existing['id']).execute()
-            logger.debug("Zaktualizowano kierunek: %s", kierunek['nazwa_kierunku'])
-        else:
-            response = self.supabase.table('kierunki').insert(kierunek).execute()
-            logger.debug("Dodano nowy kierunek: %s", kierunek['nazwa_kierunku'])
+        """Dodaje lub aktualizuje kierunek w bazie danych."""
+        conn, cursor = self.get_connection()
 
-        return response.data[0]
+        query = """
+        INSERT INTO kierunki (nazwa_kierunku, wydzial, link_grupy)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (nazwa_kierunku, wydzial) 
+        DO UPDATE SET
+        link_grupy = EXCLUDED.link_grupy
+        RETURNING id
+        """
+        values = (
+            kierunek['nazwa_kierunku'],
+            kierunek['wydzial'],
+            kierunek['link_grupy']
+        )
 
-    # GRUPY
-    def get_all_grupy(self):
+        try:
+            cursor.execute(query, values)
+            result_id = cursor.fetchone()[0]
+            return result_id
+        except psycopg2.Error as e:
+            logger.error("Błąd podczas dodawania kierunku: {}".format(str(e)))
+
+            # Sprawdź czy ograniczenie już istnieje
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM pg_constraint 
+                    WHERE conname = 'unique_kierunek'
+                """)
+                constraint_exists = cursor.fetchone()[0] > 0
+
+                if not constraint_exists:
+                    # Dodaj ograniczenie jeśli nie istnieje
+                    cursor.execute("""
+                        ALTER TABLE kierunki ADD CONSTRAINT unique_kierunek 
+                        UNIQUE (nazwa_kierunku, wydzial)
+                    """)
+
+                    # Spróbuj ponownie
+                    cursor.execute(query, values)
+                    result_id = cursor.fetchone()[0]
+                    return result_id
+            except Exception as add_constraint_error:
+                logger.error("Błąd podczas dodawania ograniczenia: {}".format(str(add_constraint_error)))
+
+            # Ostatnia próba - dodaj bez klauzuli ON CONFLICT
+            try:
+                fallback_query = """
+                INSERT INTO kierunki (nazwa_kierunku, wydzial, link_grupy)
+                VALUES (%s, %s, %s)
+                RETURNING id
+                """
+                cursor.execute(fallback_query, values)
+                result_id = cursor.fetchone()[0]
+                return result_id
+            except Exception as inner_e:
+                logger.error("Nie udało się dodać kierunku: {}".format(str(inner_e)))
+                return None
+
+    # ======= METODY DLA GRUP =======
+
+    def get_grupy(self):
         """Pobiera wszystkie grupy z bazy danych."""
-        response = self.supabase.table('grupy').select('*').execute()
-        return response.data
+        query = "SELECT * FROM grupy"
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
 
-    def get_grupy_by_kierunek_id(self, kierunek_id):
+    def get_grupa_by_id(self, grupa_id):
+        """Pobiera grupę po ID."""
+        query = "SELECT * FROM grupy WHERE id = %s"
+        self.cursor.execute(query, (grupa_id,))
+        result = self.cursor.fetchone()
+        return dict(result) if result else None
+
+    def get_grupy_by_kierunek(self, kierunek_id):
         """Pobiera grupy dla danego kierunku."""
-        response = self.supabase.table('grupy').select('*').eq('kierunek_id', kierunek_id).execute()
-        return response.data
-
-    def get_grupa_by_kod(self, kod_grupy):
-        """Pobiera grupę po kodzie."""
-        response = self.supabase.table('grupy').select('*').eq('kod_grupy', kod_grupy).execute()
-        if response.data:
-            return response.data[0]
-        return None
+        query = "SELECT * FROM grupy WHERE kierunek_id = %s"
+        self.cursor.execute(query, (kierunek_id,))
+        return self.cursor.fetchall()
 
     def upsert_grupa(self, grupa):
-        """Wstawia lub aktualizuje grupę."""
-        existing = self.get_grupa_by_kod(grupa['kod_grupy']) if 'kod_grupy' in grupa and grupa['kod_grupy'] else None
+        """Dodaje lub aktualizuje grupę w bazie danych."""
+        conn, cursor = self.get_connection()
 
-        if existing:
-            response = self.supabase.table('grupy').update(grupa).eq('id', existing['id']).execute()
-            logger.debug("Zaktualizowano grupę: %s", grupa.get('kod_grupy', 'bez kodu'))
-        else:
-            response = self.supabase.table('grupy').insert(grupa).execute()
-            logger.debug("Dodano nową grupę: %s", grupa.get('kod_grupy', 'bez kodu'))
+        query = """
+        INSERT INTO grupy (kod_grupy, kierunek_id, link_planu, tryb_studiow, semestr)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (kod_grupy, kierunek_id) 
+        DO UPDATE SET
+        link_planu = EXCLUDED.link_planu,
+        tryb_studiow = EXCLUDED.tryb_studiow,
+        semestr = EXCLUDED.semestr
+        RETURNING id
+        """
+        values = (
+            grupa['kod_grupy'],
+            grupa['kierunek_id'],
+            grupa['link_planu'],
+            grupa['tryb_studiow'],
+            grupa['semestr']
+        )
 
-        return response.data[0]
+        try:
+            cursor.execute(query, values)
+            result_id = cursor.fetchone()[0]
+            return result_id
+        except psycopg2.Error as e:
+            logger.error("Błąd podczas dodawania grupy: {}".format(str(e)))
 
-    # NAUCZYCIELE
-    def get_all_nauczyciele(self):
+            # Sprawdź czy ograniczenie już istnieje
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM pg_constraint 
+                    WHERE conname = 'unique_grupa'
+                """)
+                constraint_exists = cursor.fetchone()[0] > 0
+
+                if not constraint_exists:
+                    # Dodaj ograniczenie jeśli nie istnieje
+                    cursor.execute("""
+                        ALTER TABLE grupy ADD CONSTRAINT unique_grupa 
+                        UNIQUE (kod_grupy, kierunek_id)
+                    """)
+
+                    # Spróbuj ponownie
+                    cursor.execute(query, values)
+                    result_id = cursor.fetchone()[0]
+                    return result_id
+            except Exception as add_constraint_error:
+                logger.error("Błąd podczas dodawania ograniczenia: {}".format(str(add_constraint_error)))
+
+            # Ostatnia próba - dodaj bez klauzuli ON CONFLICT
+            try:
+                fallback_query = """
+                INSERT INTO grupy (kod_grupy, kierunek_id, link_planu, tryb_studiow, semestr)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+                """
+                cursor.execute(fallback_query, values)
+                result_id = cursor.fetchone()[0]
+                return result_id
+            except Exception as inner_e:
+                logger.error("Nie udało się dodać grupy: {}".format(str(inner_e)))
+                return None
+
+    # ======= METODY DLA NAUCZYCIELI =======
+
+    def get_nauczyciele(self):
         """Pobiera wszystkich nauczycieli z bazy danych."""
-        response = self.supabase.table('nauczyciele').select('*').execute()
-        return response.data
+        query = "SELECT * FROM nauczyciele"
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
+
+    def get_nauczyciel_by_id(self, nauczyciel_id):
+        """Pobiera nauczyciela po ID."""
+        query = "SELECT * FROM nauczyciele WHERE id = %s"
+        self.cursor.execute(query, (nauczyciel_id,))
+        result = self.cursor.fetchone()
+        return dict(result) if result else None
 
     def get_nauczyciel_by_name(self, imie_nazwisko):
         """Pobiera nauczyciela po imieniu i nazwisku."""
-        response = self.supabase.table('nauczyciele').select('*').eq('imie_nazwisko', imie_nazwisko).execute()
-        if response.data:
-            return response.data[0]
+        query = "SELECT * FROM nauczyciele WHERE imie_nazwisko = %s"
+        self.cursor.execute(query, (imie_nazwisko,))
+        result = self.cursor.fetchone()
+        return dict(result) if result else None
+
+    def get_nauczyciel_by_external_id(self, external_id):
+        """Pobiera nauczyciela na podstawie zewnętrznego ID ze strony."""
+        query = """
+        SELECT * FROM nauczyciele
+        WHERE link_planu LIKE %s
+        """
+        self.cursor.execute(query, ('%{}%'.format(external_id),))
+        result = self.cursor.fetchone()
+
+        if result:
+            return dict(result)
         return None
 
     def upsert_nauczyciel(self, nauczyciel):
-        """Wstawia lub aktualizuje nauczyciela."""
-        existing = self.get_nauczyciel_by_name(nauczyciel['imie_nazwisko'])
+        """Dodaje lub aktualizuje nauczyciela w bazie danych."""
+        conn, cursor = self.get_connection()
 
-        if existing:
-            response = self.supabase.table('nauczyciele').update(nauczyciel).eq('id', existing['id']).execute()
-            logger.debug("Zaktualizowano nauczyciela: %s", nauczyciel['imie_nazwisko'])
-        else:
-            response = self.supabase.table('nauczyciele').insert(nauczyciel).execute()
-            logger.debug("Dodano nowego nauczyciela: %s", nauczyciel['imie_nazwisko'])
-
-        return response.data[0]
-
-    # ZAJĘCIA
-    def get_matching_zajecia(self, przedmiot, od, do_, miejsce):
-        """Sprawdza czy istnieją zajęcia o podanych parametrach."""
-        response = self.supabase.table('zajecia').select('*') \
-            .eq('przedmiot', przedmiot) \
-            .eq('od', od) \
-            .eq('do_', do_) \
-            .eq('miejsce', miejsce).execute()
-
-        if response.data:
-            return response.data[0]
-        return None
-
-    def insert_zajecia(self, zajecia):
-        """Wstawia nowe zajęcia do bazy danych."""
-        response = self.supabase.table('zajecia').insert(zajecia).execute()
-        logger.debug("Dodano nowe zajęcia: %s (%s - %s)",
-                     zajecia['przedmiot'], zajecia['od'], zajecia['do_'])
-        return response.data[0]
-
-    def upsert_zajecia(self, zajecia):
-        """Wstawia lub aktualizuje zajęcia oraz zwraca informację czy były dodane (True) czy zaktualizowane (False)."""
-        existing = self.get_matching_zajecia(
-            zajecia['przedmiot'],
-            zajecia['od'],
-            zajecia['do_'],
-            zajecia['miejsce']
+        query = """
+        INSERT INTO nauczyciele (imie_nazwisko, instytut, email, link_planu)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (imie_nazwisko, instytut) 
+        DO UPDATE SET
+        email = EXCLUDED.email,
+        link_planu = EXCLUDED.link_planu
+        RETURNING id
+        """
+        values = (
+            nauczyciel['imie_nazwisko'],
+            nauczyciel['instytut'],
+            nauczyciel.get('email'),
+            nauczyciel.get('link_planu')
         )
 
-        if existing:
-            # Aktualizacja istniejących zajęć
-            zajecia['data_aktualizacji'] = 'now()'
-            response = self.supabase.table('zajecia').update(zajecia).eq('id', existing['id']).execute()
-            logger.debug("Zaktualizowano zajęcia: %s (%s - %s)",
-                         zajecia['przedmiot'], zajecia['od'], zajecia['do_'])
-            return response.data[0], False
-        else:
-            # Dodanie nowych zajęć
-            zajecia['data_utworzenia'] = 'now()'
-            zajecia['data_aktualizacji'] = 'now()'
-            response = self.supabase.table('zajecia').insert(zajecia).execute()
-            logger.debug("Dodano nowe zajęcia: %s (%s - %s)",
-                         zajecia['przedmiot'], zajecia['od'], zajecia['do_'])
-            return response.data[0], True
-
-    def link_zajecia_to_grupa(self, zajecia_id, grupa_id):
-        """Tworzy powiązanie między zajęciami a grupą."""
         try:
-            self.supabase.table('zajecia_grupy').insert({
-                'zajecia_id': zajecia_id,
-                'grupa_id': grupa_id
-            }).execute()
-            logger.debug("Powiązano zajęcia %s z grupą %s", zajecia_id, grupa_id)
-        except Exception as e:
-            # Ignorujemy błędy duplikacji (constraint violation)
-            if "duplicate key value violates unique constraint" not in str(e):
-                raise
+            cursor.execute(query, values)
+            result_id = cursor.fetchone()[0]
+            return result_id
+        except psycopg2.Error as e:
+            logger.error("Błąd podczas dodawania nauczyciela: {}".format(str(e)))
 
-    def link_zajecia_to_nauczyciel(self, zajecia_id, nauczyciel_id):
-        """Tworzy powiązanie między zajęciami a nauczycielem."""
+            # Sprawdź czy ograniczenie już istnieje
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM pg_constraint 
+                    WHERE conname = 'unique_nauczyciel'
+                """)
+                constraint_exists = cursor.fetchone()[0] > 0
+
+                if not constraint_exists:
+                    # Dodaj ograniczenie jeśli nie istnieje
+                    cursor.execute("""
+                        ALTER TABLE nauczyciele ADD CONSTRAINT unique_nauczyciel 
+                        UNIQUE (imie_nazwisko, instytut)
+                    """)
+
+                    # Spróbuj ponownie
+                    cursor.execute(query, values)
+                    result_id = cursor.fetchone()[0]
+                    return result_id
+            except Exception as add_constraint_error:
+                logger.error("Błąd podczas dodawania ograniczenia: {}".format(str(add_constraint_error)))
+
+            # Ostatnia próba - dodaj bez klauzuli ON CONFLICT
+            try:
+                fallback_query = """
+                INSERT INTO nauczyciele (imie_nazwisko, instytut, email, link_planu)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """
+                cursor.execute(fallback_query, values)
+                result_id = cursor.fetchone()[0]
+                return result_id
+            except Exception as inner_e:
+                logger.error("Nie udało się dodać nauczyciela: {}".format(str(inner_e)))
+                return None
+
+    # ======= METODY DLA PLANÓW GRUP =======
+
+    def get_plany_grup(self):
+        """Pobiera wszystkie plany grup z bazy danych."""
+        query = "SELECT * FROM plany_grup"
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
+
+    def get_plan_grupy_by_id(self, plan_id):
+        """Pobiera plan grupy po ID."""
+        query = "SELECT * FROM plany_grup WHERE id = %s"
+        self.cursor.execute(query, (plan_id,))
+        result = self.cursor.fetchone()
+        return dict(result) if result else None
+
+    def get_plan_by_grupa_id(self, grupa_id):
+        """Pobiera plan dla konkretnej grupy."""
+        query = "SELECT * FROM plany_grup WHERE grupa_id = %s ORDER BY od"
+        self.cursor.execute(query, (grupa_id,))
+        return self.cursor.fetchall()
+
+    def upsert_plan_grupy(self, plan_entry):
+        """Dodaje lub aktualizuje wpis w planie grupy."""
+        conn, cursor = self.get_connection()
+
+        # Definiujemy query i values na początku funkcji
+        query = """
+        INSERT INTO plany_grup 
+        (grupa_id, link_ics, nauczyciel_id, od, do_, przedmiot, rz, miejsce)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (grupa_id, od, do_, przedmiot) 
+        DO UPDATE SET
+        link_ics = EXCLUDED.link_ics,
+        nauczyciel_id = EXCLUDED.nauczyciel_id,
+        rz = EXCLUDED.rz,
+        miejsce = EXCLUDED.miejsce
+        RETURNING id
+        """
+        values = (
+            plan_entry['grupa_id'],
+            plan_entry['link_ics'],
+            plan_entry['nauczyciel_id'],
+            plan_entry['od'],
+            plan_entry['do_'],
+            plan_entry['przedmiot'],
+            plan_entry['rz'],
+            plan_entry['miejsce']
+        )
+
         try:
-            self.supabase.table('zajecia_nauczyciele').insert({
-                'zajecia_id': zajecia_id,
-                'nauczyciel_id': nauczyciel_id
-            }).execute()
-            logger.debug("Powiązano zajęcia %s z nauczycielem %s", zajecia_id, nauczyciel_id)
+            cursor.execute(query, values)
+            result_id = cursor.fetchone()[0]
+            return result_id
+        except psycopg2.Error as e:
+            logger.error("Błąd podczas zapisywania planu grupy: {}".format(str(e)))
+
+            # Sprawdź czy ograniczenie już istnieje
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM pg_constraint 
+                    WHERE conname = 'unique_plan_grupy'
+                """)
+                constraint_exists = cursor.fetchone()[0] > 0
+
+                if not constraint_exists:
+                    # Dodaj ograniczenie jeśli nie istnieje
+                    cursor.execute("""
+                        ALTER TABLE plany_grup ADD CONSTRAINT unique_plan_grupy 
+                        UNIQUE (grupa_id, od, do_, przedmiot)
+                    """)
+
+                    # Spróbuj ponownie
+                    cursor.execute(query, values)
+                    result_id = cursor.fetchone()[0]
+                    return result_id
+            except Exception as add_constraint_error:
+                logger.error("Błąd podczas dodawania ograniczenia: {}".format(str(add_constraint_error)))
+
+            # Ostatnia próba - dodaj bez klauzuli ON CONFLICT
+            try:
+                fallback_query = """
+                INSERT INTO plany_grup 
+                (grupa_id, link_ics, nauczyciel_id, od, do_, przedmiot, rz, miejsce)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """
+                cursor.execute(fallback_query, values)
+                result_id = cursor.fetchone()[0]
+                return result_id
+            except Exception as inner_e:
+                logger.error("Nie udało się dodać planu grupy: {}".format(str(inner_e)))
+                return None
+
+    # ======= METODY DLA PLANÓW NAUCZYCIELI =======
+
+    def get_plany_nauczycieli(self):
+        """Pobiera wszystkie plany nauczycieli z bazy danych."""
+        query = "SELECT * FROM plany_nauczycieli"
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
+
+    def get_plan_nauczyciela_by_id(self, plan_id):
+        """Pobiera plan nauczyciela po ID."""
+        query = "SELECT * FROM plany_nauczycieli WHERE id = %s"
+        self.cursor.execute(query, (plan_id,))
+        result = self.cursor.fetchone()
+        return dict(result) if result else None
+
+    def get_plan_by_nauczyciel_id(self, nauczyciel_id):
+        """Pobiera plan dla konkretnego nauczyciela."""
+        query = "SELECT * FROM plany_nauczycieli WHERE nauczyciel_id = %s ORDER BY od"
+        self.cursor.execute(query, (nauczyciel_id,))
+        return self.cursor.fetchall()
+
+    def upsert_plan_nauczyciela(self, plan_entry):
+        """Dodaje lub aktualizuje wpis w planie nauczyciela."""
+        conn, cursor = self.get_connection()
+
+        # Definiujemy query i values na początku funkcji
+        query = """
+        INSERT INTO plany_nauczycieli 
+        (nauczyciel_id, link_ics, od, do_, przedmiot, rz, grupy, miejsce)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (nauczyciel_id, od, do_, przedmiot) 
+        DO UPDATE SET
+        link_ics = EXCLUDED.link_ics,
+        rz = EXCLUDED.rz,
+        grupy = EXCLUDED.grupy,
+        miejsce = EXCLUDED.miejsce
+        RETURNING id
+        """
+        values = (
+            plan_entry['nauczyciel_id'],
+            plan_entry['link_ics'],
+            plan_entry['od'],
+            plan_entry['do_'],
+            plan_entry['przedmiot'],
+            plan_entry['rz'],
+            plan_entry['grupy'],
+            plan_entry['miejsce']
+        )
+
+        try:
+            cursor.execute(query, values)
+            result_id = cursor.fetchone()[0]
+            return result_id
+        except psycopg2.Error as e:
+            logger.error("Błąd podczas zapisywania planu nauczyciela: {}".format(str(e)))
+
+            # Sprawdź czy ograniczenie już istnieje
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM pg_constraint 
+                    WHERE conname = 'unique_plan_nauczyciela'
+                """)
+                constraint_exists = cursor.fetchone()[0] > 0
+
+                if not constraint_exists:
+                    # Dodaj ograniczenie jeśli nie istnieje
+                    cursor.execute("""
+                        ALTER TABLE plany_nauczycieli ADD CONSTRAINT unique_plan_nauczyciela 
+                        UNIQUE (nauczyciel_id, od, do_, przedmiot)
+                    """)
+
+                    # Spróbuj ponownie
+                    cursor.execute(query, values)
+                    result_id = cursor.fetchone()[0]
+                    return result_id
+            except Exception as add_constraint_error:
+                logger.error("Błąd podczas dodawania ograniczenia: {}".format(str(add_constraint_error)))
+
+            # Ostatnia próba - dodaj bez klauzuli ON CONFLICT
+            try:
+                fallback_query = """
+                INSERT INTO plany_nauczycieli 
+                (nauczyciel_id, link_ics, od, do_, przedmiot, rz, grupy, miejsce)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """
+                cursor.execute(fallback_query, values)
+                result_id = cursor.fetchone()[0]
+                return result_id
+            except Exception as inner_e:
+                logger.error("Nie udało się dodać planu nauczyciela: {}".format(str(inner_e)))
+                return None
+
+    # ======= METODY DLA ZAJĘĆ (ZUNIFIKOWANY MODEL) =======
+
+    def get_zajecia(self):
+        """Pobiera wszystkie zajęcia z bazy danych."""
+        query = """
+        SELECT z.*, 
+               array_agg(DISTINCT g.kod_grupy) as grupy_kody,
+               array_agg(DISTINCT n.imie_nazwisko) as nauczyciele_nazwiska
+        FROM zajecia z
+        LEFT JOIN zajecia_grupy zg ON z.id = zg.zajecia_id
+        LEFT JOIN grupy g ON zg.grupa_id = g.id
+        LEFT JOIN zajecia_nauczyciele zn ON z.id = zn.zajecia_id
+        LEFT JOIN nauczyciele n ON zn.nauczyciel_id = n.id
+        GROUP BY z.id
+        ORDER BY z.od
+        """
+        self.cursor.execute(query)
+        return self.cursor.fetchall()
+
+    def get_zajecia_by_id(self, zajecia_id):
+        """Pobiera zajęcia po ID."""
+        query = """
+        SELECT z.*, 
+               array_agg(DISTINCT g.kod_grupy) as grupy_kody,
+               array_agg(DISTINCT n.imie_nazwisko) as nauczyciele_nazwiska
+        FROM zajecia z
+        LEFT JOIN zajecia_grupy zg ON z.id = zg.zajecia_id
+        LEFT JOIN grupy g ON zg.grupa_id = g.id
+        LEFT JOIN zajecia_nauczyciele zn ON z.id = zn.zajecia_id
+        LEFT JOIN nauczyciele n ON zn.nauczyciel_id = n.id
+        WHERE z.id = %s
+        GROUP BY z.id
+        """
+        self.cursor.execute(query, (zajecia_id,))
+        result = self.cursor.fetchone()
+        return dict(result) if result else None
+
+    def get_zajecia_by_grupa(self, grupa_id):
+        """Pobiera zajęcia dla konkretnej grupy."""
+        query = """
+        SELECT z.*, 
+               array_agg(DISTINCT n.imie_nazwisko) as nauczyciele_nazwiska
+        FROM zajecia z
+        JOIN zajecia_grupy zg ON z.id = zg.zajecia_id
+        LEFT JOIN zajecia_nauczyciele zn ON z.id = zn.zajecia_id
+        LEFT JOIN nauczyciele n ON zn.nauczyciel_id = n.id
+        WHERE zg.grupa_id = %s
+        GROUP BY z.id
+        ORDER BY z.od
+        """
+        self.cursor.execute(query, (grupa_id,))
+        return self.cursor.fetchall()
+
+    def get_zajecia_by_nauczyciel(self, nauczyciel_id):
+        """Pobiera zajęcia dla konkretnego nauczyciela."""
+        query = """
+        SELECT z.*, 
+               array_agg(DISTINCT g.kod_grupy) as grupy_kody
+        FROM zajecia z
+        JOIN zajecia_nauczyciele zn ON z.id = zn.zajecia_id
+        LEFT JOIN zajecia_grupy zg ON z.id = zg.zajecia_id
+        LEFT JOIN grupy g ON zg.grupa_id = g.id
+        WHERE zn.nauczyciel_id = %s
+        GROUP BY z.id
+        ORDER BY z.od
+        """
+        self.cursor.execute(query, (nauczyciel_id,))
+        return self.cursor.fetchall()
+
+    def upsert_zajecia(self, zajecia_data):
+        """Dodaje lub aktualizuje zajęcia w bazie danych."""
+        conn, cursor = self.get_connection()
+
+        # Definiujemy query i values na początku funkcji
+        query = """
+        INSERT INTO zajecia (przedmiot, od, do_, miejsce, rz, link_ics)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        ON CONFLICT (przedmiot, od, do_, miejsce) 
+        DO UPDATE SET
+        rz = EXCLUDED.rz,
+        link_ics = EXCLUDED.link_ics,
+        data_aktualizacji = CURRENT_TIMESTAMP
+        RETURNING id
+        """
+        values = (
+            zajecia_data['przedmiot'],
+            zajecia_data['od'],
+            zajecia_data['do_'],
+            zajecia_data['miejsce'],
+            zajecia_data['rz'],
+            zajecia_data.get('link_ics')
+        )
+
+        try:
+            cursor.execute(query, values)
+            result_id = cursor.fetchone()[0]
+
+            # Powiąż z grupami, jeśli podano
+            if 'grupy_ids' in zajecia_data and zajecia_data['grupy_ids']:
+                for grupa_id in zajecia_data['grupy_ids']:
+                    self.add_grupa_to_zajecia(result_id, grupa_id)
+
+            # Powiąż z nauczycielami, jeśli podano
+            if 'nauczyciele_ids' in zajecia_data and zajecia_data['nauczyciele_ids']:
+                for nauczyciel_id in zajecia_data['nauczyciele_ids']:
+                    self.add_nauczyciel_to_zajecia(result_id, nauczyciel_id)
+
+            return result_id
+        except psycopg2.Error as e:
+            logger.error("Błąd podczas zapisywania zajęć: {}".format(str(e)))
+
+            # Sprawdź czy ograniczenie już istnieje
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM pg_constraint 
+                    WHERE conname = 'unique_zajecia'
+                """)
+                constraint_exists = cursor.fetchone()[0] > 0
+
+                if not constraint_exists:
+                    # Dodaj ograniczenie jeśli nie istnieje
+                    cursor.execute("""
+                        ALTER TABLE zajecia ADD CONSTRAINT unique_zajecia 
+                        UNIQUE (przedmiot, od, do_, miejsce)
+                    """)
+
+                    # Spróbuj ponownie
+                    cursor.execute(query, values)
+                    result_id = cursor.fetchone()[0]
+                    return result_id
+            except Exception as add_constraint_error:
+                logger.error("Błąd podczas dodawania ograniczenia: {}".format(str(add_constraint_error)))
+
+            # Ostatnia próba - dodaj bez klauzuli ON CONFLICT
+            try:
+                fallback_query = """
+                INSERT INTO zajecia (przedmiot, od, do_, miejsce, rz, link_ics)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """
+                cursor.execute(fallback_query, values)
+                result_id = cursor.fetchone()[0]
+                return result_id
+            except Exception as inner_e:
+                logger.error("Nie udało się dodać zajęć: {}".format(str(inner_e)))
+                return None
+
+    def add_grupa_to_zajecia(self, zajecia_id, grupa_id):
+        """Dodaje powiązanie między zajęciami a grupą."""
+        conn, cursor = self.get_connection()
+
+        query = """
+        INSERT INTO zajecia_grupy (zajecia_id, grupa_id)
+        VALUES (%s, %s)
+        ON CONFLICT (zajecia_id, grupa_id) DO NOTHING
+        """
+        try:
+            cursor.execute(query, (zajecia_id, grupa_id))
+            return True
         except Exception as e:
-            # Ignorujemy błędy duplikacji (constraint violation)
-            if "duplicate key value violates unique constraint" not in str(e):
-                raise
+            logger.error("Błąd podczas dodawania grupy do zajęć: {}".format(str(e)))
+            return False
+
+    def add_nauczyciel_to_zajecia(self, zajecia_id, nauczyciel_id):
+        """Dodaje powiązanie między zajęciami a nauczycielem."""
+        conn, cursor = self.get_connection()
+
+        query = """
+        INSERT INTO zajecia_nauczyciele (zajecia_id, nauczyciel_id)
+        VALUES (%s, %s)
+        ON CONFLICT (zajecia_id, nauczyciel_id) DO NOTHING
+        """
+        try:
+            cursor.execute(query, (zajecia_id, nauczyciel_id))
+            return True
+        except Exception as e:
+            logger.error("Błąd podczas dodawania nauczyciela do zajęć: {}".format(str(e)))
+            return False
+
+    # ======= METODY PRZETWARZANIA PLANÓW DO MODELU ZUNIFIKOWANEGO =======
+
+    def process_plany_to_zajecia(self):
+        """Przetwarza dane z plany_grup i plany_nauczycieli do zunifikowanego modelu zajecia."""
+        try:
+            # Krok 1: Przenieś dane z plany_grup do zajecia
+            query_grupy = """
+            WITH inserted AS (
+                INSERT INTO zajecia (przedmiot, od, do_, miejsce, rz, link_ics, data_utworzenia, data_aktualizacji)
+                SELECT DISTINCT
+                    przedmiot, od, do_, miejsce, rz, link_ics, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                FROM plany_grup
+                ON CONFLICT (przedmiot, od, do_, miejsce) DO UPDATE SET
+                    rz = EXCLUDED.rz,
+                    link_ics = EXCLUDED.link_ics,
+                    data_aktualizacji = CURRENT_TIMESTAMP
+                RETURNING id, przedmiot, od, do_, miejsce
+            )
+            INSERT INTO zajecia_grupy (zajecia_id, grupa_id)
+            SELECT i.id, pg.grupa_id
+            FROM inserted i
+            JOIN plany_grup pg ON 
+                i.przedmiot = pg.przedmiot AND
+                i.od = pg.od AND
+                i.do_ = pg.do_ AND
+                i.miejsce = pg.miejsce
+            ON CONFLICT (zajecia_id, grupa_id) DO NOTHING
+            RETURNING 1
+            """
+            self.cursor.execute(query_grupy)
+            result_grupy = self.cursor.rowcount
+
+            # Krok 2: Przenieś powiązania nauczyciel-zajęcia z plany_grup
+            query_nauczyciele_grupy = """
+            WITH zajecia_data AS (
+                SELECT z.id AS zajecia_id, pg.nauczyciel_id
+                FROM zajecia z
+                JOIN plany_grup pg ON 
+                    z.przedmiot = pg.przedmiot AND
+                    z.od = pg.od AND
+                    z.do_ = pg.do_ AND
+                    z.miejsce = pg.miejsce
+                WHERE pg.nauczyciel_id IS NOT NULL
+            )
+            INSERT INTO zajecia_nauczyciele (zajecia_id, nauczyciel_id)
+            SELECT zajecia_id, nauczyciel_id
+            FROM zajecia_data
+            ON CONFLICT (zajecia_id, nauczyciel_id) DO NOTHING
+            RETURNING 1
+            """
+            self.cursor.execute(query_nauczyciele_grupy)
+            result_nauczyciele_grupy = self.cursor.rowcount
+
+            # Krok 3: Przenieś dane z plany_nauczycieli do zajecia
+            query_nauczyciele = """
+            WITH inserted AS (
+                INSERT INTO zajecia (przedmiot, od, do_, miejsce, rz, link_ics, data_utworzenia, data_aktualizacji)
+                SELECT DISTINCT
+                    przedmiot, od, do_, miejsce, rz, link_ics, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                FROM plany_nauczycieli
+                ON CONFLICT (przedmiot, od, do_, miejsce) DO UPDATE SET
+                    rz = EXCLUDED.rz,
+                    link_ics = EXCLUDED.link_ics,
+                    data_aktualizacji = CURRENT_TIMESTAMP
+                RETURNING id, przedmiot, od, do_, miejsce
+            )
+            INSERT INTO zajecia_nauczyciele (zajecia_id, nauczyciel_id)
+            SELECT i.id, pn.nauczyciel_id
+            FROM inserted i
+            JOIN plany_nauczycieli pn ON 
+                i.przedmiot = pn.przedmiot AND
+                i.od = pn.od AND
+                i.do_ = pn.do_ AND
+                i.miejsce = pn.miejsce
+            ON CONFLICT (zajecia_id, nauczyciel_id) DO NOTHING
+            RETURNING 1
+            """
+            self.cursor.execute(query_nauczyciele)
+            result_nauczyciele = self.cursor.rowcount
+
+            logger.info("Przetworzono plany zajęć do zunifikowanego modelu. Dodano/zaktualizowano: {} zajęć z grup, {} powiązań nauczyciel-zajęcia z grup, {} zajęć nauczycieli.".format(
+                result_grupy, result_nauczyciele_grupy, result_nauczyciele
+            ))
+
+            return result_grupy + result_nauczyciele
+        except Exception as e:
+            logger.error("Błąd podczas przetwarzania planów do zunifikowanego modelu: {}".format(str(e)))
+            self.conn.rollback()
+            return 0
