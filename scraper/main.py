@@ -1,7 +1,6 @@
 import logging
 import os
 import argparse
-import sys
 from db import DB
 from kierunki_scraper import KierunkiScraper
 from grupy_scraper import GrupyScraper
@@ -20,53 +19,51 @@ logging.basicConfig(
 
 logger = logging.getLogger('UZ_Scraper')
 
+
 def main():
     parser = argparse.ArgumentParser(description='UZ Scraper')
-    parser.add_argument('--db-host', default=os.environ.get('DB_HOST', 'localhost'),
-                        help='Database host')
-    parser.add_argument('--db-name', default=os.environ.get('DB_NAME', 'myuz'),
-                        help='Database name')
-    parser.add_argument('--db-user', default=os.environ.get('DB_USER', 'postgres'),
-                        help='Database user')
-    parser.add_argument('--db-password', default=os.environ.get('DB_PASSWORD', 'postgres'),
-                        help='Database password')
+
+    # Nowe parametry dla Supabase
+    parser.add_argument('--supabase-url', default=os.environ.get('SUPABASE_URL', ''),
+                        help='URL Supabase')
+    parser.add_argument('--supabase-key', default=os.environ.get('SUPABASE_SERVICE_ROLE_KEY', ''),
+                        help='Klucz Service Role Supabase')
     parser.add_argument('--base-url', default=os.environ.get('BASE_URL', 'http://plan.uz.zgora.pl'),
                         help='Base URL for scraping')
-    parser.add_argument('--threads', type=int, default=os.environ.get('THREADS', 8),
-                        help='Number of threads to use')
 
     args = parser.parse_args()
+
+    # Sprawdzanie dostępności kluczy Supabase
+    if not args.supabase_url:
+        logger.error("Brak URL Supabase. Ustaw zmienną środowiskową SUPABASE_URL.")
+        return
+
+    if not args.supabase_key:
+        logger.error(
+            "Brak klucza Service Role Supabase. Ustaw zmienną środowiskową SUPABASE_SERVICE_ROLE_KEY.")
+        return
+
+    # Pokaż informacje o połączeniu (bez klucza)
+    logger.info("Łączenie z bazą danych Supabase: {}".format(args.supabase_url))
 
     # Inicjalizacja połączenia z bazą danych
     try:
         db = DB(
-            host=args.db_host,
-            dbname=args.db_name,
-            user=args.db_user,
-            password=args.db_password
+            supabase_url=args.supabase_url,
+            supabase_key=args.supabase_key
         )
     except Exception as e:
         logger.error("Błąd połączenia z bazą danych: {}".format(str(e)))
-        sys.exit(1)
+        raise
 
     base_url = args.base_url
-    max_threads = args.threads
-
     logger.info("Używam base_url: {}".format(base_url))
-    logger.info("Liczba wątków: {}".format(max_threads))
 
     # Inicjalizacja scraperów z przekazaniem base_url
     kierunki_scraper = KierunkiScraper(db, base_url)
-    kierunki_scraper.max_threads = max_threads
-
     grupy_scraper = GrupyScraper(db, base_url)
-    grupy_scraper.max_threads = max_threads
-
     nauczyciele_scraper = NauczycieleScraper(db, base_url)
-    nauczyciele_scraper.max_threads = max_threads
-
     plany_scraper = PlanyScraper(db, base_url)
-    plany_scraper.max_threads = max_threads * 2  # więcej wątków dla planów
 
     try:
         # Uruchomienie scraperów
@@ -86,16 +83,12 @@ def main():
         plany_count = plany_scraper.scrape_and_save()
         logger.info("Zaktualizowano {} wpisów w planach.".format(plany_count))
 
-        # Opcjonalne przetwarzanie do zunifikowanego modelu
-        logger.info("Przetwarzanie planów do zunifikowanego modelu...")
-        zajecia_count = db.process_plany_to_zajecia()
-        logger.info("Przetworzono {} zajęć w zunifikowanym modelu.".format(zajecia_count))
-
         logger.info("Scrapowanie zakończone pomyślnie!")
     except Exception as e:
         logger.error("Wystąpił błąd: {}".format(str(e)))
     finally:
         db.close()
+
 
 if __name__ == "__main__":
     main()

@@ -3,14 +3,12 @@ import re
 from bs4 import BeautifulSoup
 import requests
 import threading
-import sys
 from datetime import datetime
 
-# Kompatybilność z Python 2.7 i Python 3.x
-if sys.version_info[0] >= 3:
-    import queue
-else:
-    import Queue as queue
+try:
+    import Queue as queue  # Python 2
+except ImportError:
+    import queue  # Python 3
 
 logger = logging.getLogger('UZ_Scraper.Plany')
 
