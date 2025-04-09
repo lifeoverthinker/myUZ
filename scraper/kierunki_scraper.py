@@ -5,18 +5,20 @@ import requests
 from bs4 import BeautifulSoup
 
 try:
+    # noinspection PyPep8Naming
     import Queue as queue  # Python 2
 except ImportError:
     import queue  # Python 3
 
 logger = logging.getLogger('UZ_Scraper.Kierunki')
 
+
 class KierunkiScraper:
     def __init__(self, db, base_url):
         self.db = db
         self.base_url = base_url
         self.session = requests.Session()
-        self.task_queue = queue.Queue()  # Zmieniona nazwa dla klarowności
+        self.task_queue = queue.Queue()
         self.lock = threading.Lock()
         self.total_updated = 0
         self.max_threads = 8
@@ -24,7 +26,7 @@ class KierunkiScraper:
     @staticmethod
     def fix_url(url):
         """Poprawia nieprawidłowy URL."""
-        if isinstance(url, str) and url.startswith('/'):  # Dodane sprawdzenie typu
+        if isinstance(url, str) and url.startswith('/'):
             url = url[1:]
         return url
 
@@ -39,7 +41,7 @@ class KierunkiScraper:
 
             # Wyszukanie linków do wydziałów
             wydzialy_links = soup.select('div.container a[href*="grupy_lista.php"]')
-            logger.info("Znaleziono {} wydziałów".format(len(wydzialy_links)))
+            logger.info("Znaleziono {len(wydzialy_links)} wydziałów")
 
             # Dodaj wydziały do kolejki
             for link in wydzialy_links:
@@ -56,10 +58,11 @@ class KierunkiScraper:
             # Czekaj na zakończenie wszystkich wątków
             self.task_queue.join()
 
-            logger.info("Zakończono scrapowanie kierunków. Zaktualizowano {} kierunków".format(self.total_updated))
+            logger.info(
+                "Zakończono scrapowanie kierunków. Zaktualizowano {self.total_updated} kierunków")
             return self.total_updated
         except Exception as e:
-            logger.error("Błąd podczas scrapowania kierunków: {}".format(str(e)))
+            logger.error("Błąd podczas scrapowania kierunków: {str(e)}")
             raise e
 
     def worker(self):
@@ -71,18 +74,18 @@ class KierunkiScraper:
                 with self.lock:
                     self.total_updated += updated_count
                 self.task_queue.task_done()
-            except queue.Empty:  # Zmienione z Queue.Empty
+            except queue.Empty:
                 break
             except Exception as e:
-                logger.error("Błąd w wątku scrapowania kierunków: {}".format(str(e)))
+                logger.error("Błąd w wątku scrapowania kierunków: {str(e)}")
                 self.task_queue.task_done()
 
     def scrape_wydzial(self, link, nazwa_wydzialu):
         """Scrapuje kierunki dla konkretnego wydziału."""
         try:
             url = link
-            if isinstance(url, str) and not url.startswith('http'):  # Dodane sprawdzenie typu
-                url = "{}/{}".format(self.base_url, KierunkiScraper.fix_url(url))
+            if isinstance(url, str) and not url.startswith('http'):
+                url = "{self.base_url}/{KierunkiScraper.fix_url(url)}"
 
             response = self.session.get(url)
             soup = BeautifulSoup(response.content, 'html.parser')
@@ -94,11 +97,11 @@ class KierunkiScraper:
                 nazwa_kierunku = link.text.strip()
                 href = link.get('href')
 
-                if isinstance(href, str) and not href.startswith('http'):  # Dodane sprawdzenie typu
+                if isinstance(href, str) and not href.startswith('http'):
                     if href.startswith('/'):
-                        href = "{}{}".format(self.base_url, href)
+                        href = "{self.base_url}{href}"
                     else:
-                        href = "{}/{}".format(self.base_url, href)
+                        href = "{self.base_url}/{href}"
 
                 kierunek = {
                     "nazwa_kierunku": nazwa_kierunku,
@@ -109,10 +112,9 @@ class KierunkiScraper:
                 self.db.upsert_kierunek(kierunek)
                 updated_count += 1
 
-            logger.info("Scrapowanie zakończone dla wydziału {}. Zaktualizowano {} kierunków.".format(
-                nazwa_wydzialu, updated_count
-            ))
+            logger.info(
+                "Scrapowanie zakończone dla wydziału {nazwa_wydzialu}. Zaktualizowano {updated_count} kierunków.")
             return updated_count
         except Exception as e:
-            logger.error("Błąd podczas scrapowania wydziału {}: {}".format(nazwa_wydzialu, str(e)))
+            logger.error("Błąd podczas scrapowania wydziału {nazwa_wydzialu}: {str(e)}")
             return 0
