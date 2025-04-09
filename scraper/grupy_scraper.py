@@ -1,15 +1,8 @@
-import logging
-import threading
-from typing import Optional
-
 import requests
 from bs4 import BeautifulSoup
-
-try:
-    # noinspection PyPep8Naming
-    import Queue as queue  # Python 2
-except ImportError:
-    import queue  # Python 3
+import logging
+import re
+from urllib.parse import urlparse, parse_qs
 
 logger = logging.getLogger('UZ_Scraper.Grupy')
 
@@ -18,115 +11,98 @@ class GrupyScraper:
     def __init__(self, db, base_url):
         self.db = db
         self.base_url = base_url
-        self.session = requests.Session()
-        self.task_queue = queue.Queue()
-        self.lock = threading.Lock()
         self.total_updated = 0
-        self.max_threads = 8
-
-    @staticmethod
-    def fix_url(url: Optional[str]) -> str:
-        """Poprawia nieprawidłowy URL."""
-        if url is None:
-            return ""
-        if isinstance(url, str) and url.startswith('/'):
-            url = url[1:]
-        return url
 
     def scrape_and_save(self):
-        """Scrapuje grupy zajęciowe i zapisuje je do bazy danych."""
-        try:
-            logger.info("Rozpoczęto scrapowanie grup zajęciowych")
+        """Scrapuje i zapisuje grupy do bazy danych."""
+        logger.info("Rozpoczęto scrapowanie grup zajęciowych")
 
-            # Pobieranie kierunków z bazy danych
-            kierunki = self.db.get_all_kierunki()
-            logger.info("Znaleziono {len(kierunki)} kierunków do scrapowania")
+        # Pobierz kierunki z bazy danych
+        kierunki = self.db.get_kierunki()
 
-            # Dodaj kierunki do kolejki
-            for kierunek in kierunki:
-                self.task_queue.put(kierunek)
+        logger.info(f"Znaleziono {len(kierunki)} kierunków do scrapowania")
 
-            # Uruchom wątki
-            threads = []
-            for i in range(min(self.max_threads, len(kierunki))):
-                t = threading.Thread(target=self.worker)
-                t.daemon = True
-                threads.append(t)
-                t.start()
-
-            # Czekaj na zakończenie wszystkich wątków
-            self.task_queue.join()
-
-            logger.info("Zakończono scrapowanie grup. Zaktualizowano {self.total_updated} grup")
-            return self.total_updated
-        except Exception as e:
-            logger.error("Błąd podczas scrapowania grup: {str(e)}")
-            raise e
-
-    def worker(self):
-        """Funkcja pracownika dla wątku."""
-        while True:
-            # noinspection PyBroadException,PyUnusedLocal
-            try:
-                kierunek = self.task_queue.get(block=False)
-                updated_count = self.scrape_kierunek(kierunek)
-                with self.lock:
-                    self.total_updated += updated_count
-                self.task_queue.task_done()
-            except queue.Empty:
-                break
-            except Exception as e:
-                logger.error("Błąd w wątku scrapowania grup: {str(e)}")
-                self.task_queue.task_done()
-
-    def scrape_kierunek(self, kierunek):
-        """Scrapuje grupy dla konkretnego kierunku."""
-        # noinspection PyBroadException,PyUnusedLocal
-        try:
+        for kierunek in kierunki:
+            # Pobierz ID kierunku z linku
             link_grupy = kierunek.get('link_grupy', '')
-            # noinspection PyUnusedLocal
-            nazwa_kierunku = kierunek.get('nazwa_kierunku', 'Nieznany kierunek')
+            if not link_grupy:
+                continue
 
-            # Sprawdzenie czy link jest prawidłowy
-            if not link_grupy or not isinstance(link_grupy, str):
-                logger.warning("Brak lub nieprawidłowy link dla kierunku {nazwa_kierunku}")
-                return 0
+            # Wyciągnij ID kierunku z URL
+            parsed_url = urlparse(link_grupy)
+            query_params = parse_qs(parsed_url.query)
+            kierunek_id_url = query_params.get('ID', [''])[0]
 
-            # Pobieranie strony z grupami
-            response = self.session.get(link_grupy)
-            soup = BeautifulSoup(response.content, 'html.parser')
-
-            grupy_links = soup.select('table.table tr td:first-child a')
-            updated_count = 0
-
-            for link in grupy_links:
-                nazwa_grupy = link.text.strip()
-                href = link.get('href', '')
-
-                # Sprawdzenie czy href jest stringiem
-                if not isinstance(href, str):
-                    continue
-
-                # Tworzenie pełnego URL
-                if not href.startswith('http'):
-                    if href.startswith('/'):
-                        href = "{self.base_url}{href}"
-                    else:
-                        href = "{self.base_url}/{GrupyScraper.fix_url(href)}"
-
-                grupa = {
-                    "nazwa_grupy": nazwa_grupy,
-                    "kierunek_id": kierunek.get('id'),
-                    "link_plan": href
-                }
-
-                self.db.upsert_grupa(grupa)
-                updated_count += 1
+            if not kierunek_id_url:
+                continue
 
             logger.info(
-                "Scrapowanie zakończone dla kierunku {nazwa_kierunku}. Zaktualizowano {updated_count} grup.")
-            return updated_count
-        except Exception as e:
-            logger.error(
-                "Błąd podczas scrapowania kierunku {kierunek.get('nazwa_kierunku', 'Nieznany')}: {str(e)}")
-            return 0
+                f"Przetwarzanie kierunku: {kierunek['nazwa_kierunku']}, ID URL: {kierunek_id_url}")
+
+            try:
+                # Pełny URL do listy grup
+                grupy_url = f"{self.base_url}/grupy_lista_grup_kierunku.php?ID={kierunek_id_url}"
+                response = requests.get(grupy_url)
+
+                if response.status_code != 200:
+                    logger.error(f"Błąd HTTP {response.status_code} dla URL: {grupy_url}")
+                    continue
+
+                soup = BeautifulSoup(response.text, 'html.parser')
+                table = soup.find('table', {'class': 'table table-bordered table-condensed'})
+
+                if not table:
+                    logger.warning(
+                        f"Nie znaleziono tabeli grup dla kierunku: {kierunek['nazwa_kierunku']}")
+                    continue
+
+                rows = table.find_all('tr')
+
+                for row in rows:
+                    # Znajdujemy jedyną komórkę w wierszu
+                    cell = row.find('td')
+                    if not cell:
+                        continue
+
+                    # Znajdujemy link w komórce
+                    link = cell.find('a')
+                    if not link:
+                        continue
+
+                    # Pobieramy kod grupy i opis z tekstu linku
+                    full_text = link.text.strip()
+
+                    # Przykładowy format: "11AW-SP Architektura wnętrz / stacjonarne / pierwszego stopnia z tyt. licencjata"
+                    parts = full_text.split(" ", 1)
+                    kod_grupy = parts[0] if len(parts) > 0 else ""
+                    info_text = parts[1] if len(parts) > 1 else ""
+
+                    # Wyodrębnij tryb studiów
+                    tryb_studiow = "stacjonarne" if "stacjonarne" in info_text.lower() else "niestacjonarne"
+
+                    # Wyciągnij semestr - można to dopasować do danych
+                    semestr = ""  # Tutaj możesz dodać kod do wyciągania semestru, jeśli jest dostępny
+
+                    # Link do planu
+                    link_planu = link['href'] if link else None
+
+                    if kod_grupy and link_planu:
+                        grupa_data = {
+                            'kod_grupy': kod_grupy,
+                            'kierunek_id': kierunek['id'],
+                            'link_planu': link_planu,
+                            'tryb_studiow': tryb_studiow,
+                            'semestr': semestr
+                        }
+
+                        grupa_id = self.db.upsert_grupa(grupa_data)
+                        if grupa_id:
+                            self.total_updated += 1
+                            logger.info(f"Dodano/zaktualizowano grupę: {kod_grupy}")
+
+            except Exception as e:
+                logger.error(
+                    f"Błąd podczas scrapowania grup dla kierunku {kierunek['nazwa_kierunku']}: {str(e)}")
+
+        logger.info(f"Zakończono scrapowanie grup. Zaktualizowano {self.total_updated} grup")
+        return self.total_updated

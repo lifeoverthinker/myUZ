@@ -1,14 +1,7 @@
-import logging
-import threading
-
 import requests
 from bs4 import BeautifulSoup
-
-try:
-    # noinspection PyPep8Naming
-    import Queue as queue  # Python 2
-except ImportError:
-    import queue  # Python 3
+import logging
+import re
 
 logger = logging.getLogger('UZ_Scraper.Kierunki')
 
@@ -17,113 +10,68 @@ class KierunkiScraper:
     def __init__(self, db, base_url):
         self.db = db
         self.base_url = base_url
-        self.session = requests.Session()
-        self.task_queue = queue.Queue()
-        self.lock = threading.Lock()
         self.total_updated = 0
-        self.max_threads = 8
-
-    @staticmethod
-    def fix_url(url):
-        """Poprawia nieprawidłowy URL."""
-        if isinstance(url, str) and url.startswith('/'):
-            url = url[1:]
-        return url
 
     def scrape_and_save(self):
-        """Scrapuje kierunki studiów i zapisuje je do bazy danych."""
+        """Scrapuje i zapisuje kierunki studiów do bazy danych."""
+        logger.info("Rozpoczęto scrapowanie kierunków studiów")
         try:
-            logger.info("Rozpoczęto scrapowanie kierunków studiów")
+            url = f"{self.base_url}/grupy_lista_kierunkow.php"
+            logger.info(f"Pobieranie danych z URL: {url}")
 
-            # Pobieranie strony z listą wydziałów
-            response = self.session.get(self.base_url)
-            soup = BeautifulSoup(response.content, 'html.parser')
+            response = requests.get(url)
+            if response.status_code != 200:
+                logger.error(f"Błąd HTTP {response.status_code} podczas pobierania listy kierunków")
+                return 0
 
-            # Wyszukanie linków do wydziałów
-            wydzialy_links = soup.select('div.container a[href*="grupy_lista.php"]')
-            # noinspection PyCompatibility
-            logger.info(f"Znaleziono {len(wydzialy_links)} wydziałów")
+            soup = BeautifulSoup(response.text, 'html.parser')
 
-            # Dodaj wydziały do kolejki
-            for link in wydzialy_links:
-                self.task_queue.put((link.get('href'), link.text.strip()))
+            # Znajdź główną listę
+            main_list = soup.find('ul', class_='list-group')
+            if not main_list:
+                logger.error("Nie znaleziono głównej listy grup")
+                return 0
 
-            # Uruchom wątki
-            threads = []
-            for i in range(min(self.max_threads, len(wydzialy_links))):
-                t = threading.Thread(target=self.worker)
-                t.daemon = True
-                threads.append(t)
-                t.start()
+            # Znajdź wydziały (bezpośrednie elementy li w głównej liście)
+            wydzialy_items = main_list.find_all('li', class_='list-group-item', recursive=False)
 
-            # Czekaj na zakończenie wszystkich wątków
-            self.task_queue.join()
+            logger.info(f"Znaleziono {len(wydzialy_items)} wydziałów")
 
-            # noinspection PyCompatibility
+            for wydzial_item in wydzialy_items:
+                # Pobierz nazwę wydziału (tekst przed zagnieżdżoną listą)
+                wydzial_text = wydzial_item.get_text().strip().split('\n')[0]
+                wydzial_name = wydzial_text.strip()
+
+                # Znajdź zagnieżdżoną listę kierunków
+                kierunki_list = wydzial_item.find('ul', class_='list-group')
+                if not kierunki_list:
+                    continue
+
+                # Znajdź kierunki w zagnieżdżonej liście
+                kierunki_items = kierunki_list.find_all('li', class_='list-group-item')
+                logger.info(
+                    f"Znaleziono {len(kierunki_items)} kierunków dla wydziału {wydzial_name}")
+
+                for kierunek_item in kierunki_items:
+                    link_element = kierunek_item.find('a')
+                    if link_element:
+                        nazwa_kierunku = link_element.text.strip()
+                        link_grupy = link_element['href']
+
+                        kierunek_data = {
+                            'nazwa_kierunku': nazwa_kierunku,
+                            'wydzial': wydzial_name,
+                            'link_grupy': link_grupy
+                        }
+
+                        kierunek_id = self.db.upsert_kierunek(kierunek_data)
+                        if kierunek_id:
+                            self.total_updated += 1
+                            logger.info(f"Dodano/zaktualizowano kierunek: {nazwa_kierunku}")
+
             logger.info(
                 f"Zakończono scrapowanie kierunków. Zaktualizowano {self.total_updated} kierunków")
             return self.total_updated
         except Exception as e:
-            # noinspection PyCompatibility
             logger.error(f"Błąd podczas scrapowania kierunków: {str(e)}")
-            raise e
-
-    def worker(self):
-        """Funkcja pracownika dla wątku."""
-        while True:
-            try:
-                link, nazwa_wydzialu = self.task_queue.get(block=False)  # non-blocking get
-                updated_count = self.scrape_wydzial(link, nazwa_wydzialu)
-                with self.lock:
-                    self.total_updated += updated_count
-                self.task_queue.task_done()
-            except queue.Empty:
-                break
-            except Exception as e:
-                # noinspection PyCompatibility
-                logger.error(f"Błąd w wątku scrapowania kierunków: {str(e)}")
-                self.task_queue.task_done()
-
-    def scrape_wydzial(self, link, nazwa_wydzialu):
-        """Scrapuje kierunki dla konkretnego wydziału."""
-        try:
-            url = link
-            if isinstance(url, str) and not url.startswith('http'):
-                # noinspection PyCompatibility
-                url = f"{self.base_url}/{KierunkiScraper.fix_url(url)}"
-
-            response = self.session.get(url)
-            soup = BeautifulSoup(response.content, 'html.parser')
-
-            kierunki_links = soup.select('table.table tr td:first-child a')
-            updated_count = 0
-
-            for link in kierunki_links:
-                nazwa_kierunku = link.text.strip()
-                href = link.get('href')
-
-                if isinstance(href, str) and not href.startswith('http'):
-                    if href.startswith('/'):
-                        # noinspection PyCompatibility
-                        href = f"{self.base_url}{href}"
-                    else:
-                        # noinspection PyCompatibility
-                        href = f"{self.base_url}/{href}"
-
-                kierunek = {
-                    "nazwa_kierunku": nazwa_kierunku,
-                    "wydzial": nazwa_wydzialu,
-                    "link_grupy": href
-                }
-
-                self.db.upsert_kierunek(kierunek)
-                updated_count += 1
-
-            # noinspection PyCompatibility
-            logger.info(
-                f"Scrapowanie zakończone dla wydziału {nazwa_wydzialu}. Zaktualizowano {updated_count} kierunków.")
-            return updated_count
-        except Exception as e:
-            # noinspection PyCompatibility
-            logger.error(f"Błąd podczas scrapowania wydziału {nazwa_wydzialu}: {str(e)}")
             return 0

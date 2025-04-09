@@ -95,7 +95,7 @@ def main():
         # noinspection PyCompatibility
         logger.error(f"Wystąpił błąd: {str(e)}")
     finally:
-        db.close()
+        db.close_connections()
 
 
 if __name__ == "__main__":
