@@ -80,7 +80,7 @@ class PlanyScraper:
 
             # Sprawdzenie czy link jest prawidłowy
             if not link_planu or not isinstance(link_planu, str):
-                logger.warning(f"Brak lub nieprawidłowy link dla grupy {kod_grupy}")
+                logger.warning(f"Brak lub nieprawidłowy link planu dla grupy {kod_grupy}")
                 return 0
 
             # Wyciągnij ID z URL
@@ -92,19 +92,18 @@ class PlanyScraper:
                 logger.warning(f"Nie można wyciągnąć ID z linku: {link_planu}")
                 return 0
 
-            # Pełny URL do planu grupy
-            plan_url = f"{self.base_url}/grupy_plan.php?ID={grupa_id_url}"
+            logger.info(f"Pobieranie planu dla grupy {kod_grupy} z URL: {link_planu}")
 
-            logger.info(f"Pobieranie planu dla grupy {kod_grupy} z URL: {plan_url}")
-            response = self.session.get(plan_url)
-
+            # Pobieranie strony z planem
+            response = self.session.get(link_planu)
             if response.status_code != 200:
-                logger.error(f"Błąd HTTP {response.status_code} dla URL: {plan_url}")
+                logger.error(
+                    f"Błąd HTTP {response.status_code} podczas pobierania planu dla grupy {kod_grupy}")
                 return 0
 
             soup = BeautifulSoup(response.content, 'html.parser')
 
-            # Pobieranie informacji o semestrze z H3
+            # Znajdź informację o semestrze
             h3_element = soup.find('h3')
             if h3_element:
                 h3_text = h3_element.get_text(separator='\n')
@@ -112,7 +111,8 @@ class PlanyScraper:
 
                 if len(h3_lines) >= 3:
                     semestr_line = h3_lines[2].strip()
-                    semestr_match = re.search(r'semestr\s+(letni|zimowy)', semestr_line, re.IGNORECASE)
+                    semestr_match = re.search(r'semestr\s+(letni|zimowy)', semestr_line,
+                                              re.IGNORECASE)
 
                     if semestr_match:
                         semestr = semestr_match.group(1).lower()  # "letni" lub "zimowy"
@@ -130,7 +130,20 @@ class PlanyScraper:
                     ics_link = href
                     break
 
-            # Pobieranie tabeli z planem zajęć
+            # Jeśli znaleziono link do ICS, pobierz i sparsuj plik
+            if ics_link:
+                ics_url = f"{self.base_url}/{ics_link}"
+                logger.info(f"Pobieranie planu ICS dla grupy {kod_grupy} z URL: {ics_url}")
+                ics_response = self.session.get(ics_url)
+
+                if ics_response.status_code == 200:
+                    # Parsowanie ICS
+                    updated_count = self._parse_ics_file(ics_response.text, grupa_id)
+                    logger.info(
+                        f"Sparsowano plan ICS dla grupy {kod_grupy}. Zaktualizowano {updated_count} zajęć.")
+                    return updated_count
+
+            # Pobieranie tabeli z planem zajęć jako zapasowe rozwiązanie
             table = soup.find('table', {'class': 'st1'})
             if not table:
                 logger.warning(f"Nie znaleziono tabeli z planem dla grupy {kod_grupy}")
@@ -139,10 +152,12 @@ class PlanyScraper:
             # Analiza planu zajęć i zapisanie do bazy danych
             updated_count = self._parse_plan_table(table, grupa_id, ics_link)
 
-            logger.info(f"Scrapowanie zakończone dla grupy {kod_grupy}. Zaktualizowano {updated_count} zajęć.")
+            logger.info(
+                f"Scrapowanie zakończone dla grupy {kod_grupy}. Zaktualizowano {updated_count} zajęć.")
             return updated_count
         except Exception as e:
-            logger.error(f"Błąd podczas scrapowania planu dla grupy {grupa.get('kod_grupy', 'Nieznana')}: {str(e)}")
+            logger.error(
+                f"Błąd podczas scrapowania planu dla grupy {grupa.get('kod_grupy', 'Nieznana')}: {str(e)}")
             return 0
 
     def _parse_plan_table(self, table, grupa_id, ics_link):
@@ -212,7 +227,8 @@ class PlanyScraper:
                         if nauczyciel_id_url:
                             nauczyciel = {
                                 'imie_nazwisko': nauczyciel_name,
-                                'instytut': 'Do ustalenia',  # Domyślna wartość, zostanie uzupełniona przez nauczyciele_scraper
+                                'instytut': 'Do ustalenia',
+                                # Domyślna wartość, zostanie uzupełniona przez nauczyciele_scraper
                                 'link_planu': f"{self.base_url}/nauczyciel_plan.php?ID={nauczyciel_id_url}"
                             }
 
@@ -279,13 +295,16 @@ class PlanyScraper:
                         continue
 
                     # Parsowanie tabeli i zapisanie do bazy
-                    table_count = self._parse_nauczyciel_plan_table(table, nauczyciel['id'], ics_link)
+                    table_count = self._parse_nauczyciel_plan_table(table, nauczyciel['id'],
+                                                                    ics_link)
                     updated_count += table_count
 
                 except Exception as e:
-                    logger.error(f"Błąd podczas scrapowania planu dla nauczyciela {nauczyciel.get('imie_nazwisko')}: {str(e)}")
+                    logger.error(
+                        f"Błąd podczas scrapowania planu dla nauczyciela {nauczyciel.get('imie_nazwisko')}: {str(e)}")
 
-            logger.info(f"Zakończono scrapowanie planów nauczycieli. Zaktualizowano {updated_count} zajęć")
+            logger.info(
+                f"Zakończono scrapowanie planów nauczycieli. Zaktualizowano {updated_count} zajęć")
             return updated_count
 
         except Exception as e:
@@ -367,4 +386,83 @@ class PlanyScraper:
             return updated_count
         except Exception as e:
             logger.error(f"Błąd podczas parsowania tabeli planu nauczyciela: {str(e)}")
+            return 0
+
+    def _parse_ics_file(self, ics_content, grupa_id):
+        """Parsuje plik ICS z planem zajęć i zapisuje do bazy danych."""
+        try:
+            updated_count = 0
+            current_event = None
+            events = []
+
+            for line in ics_content.splitlines():
+                line = line.strip()
+
+                if line == 'BEGIN:VEVENT':
+                    current_event = {}
+                elif line == 'END:VEVENT':
+                    if current_event:
+                        events.append(current_event)
+                    current_event = None
+                elif current_event is not None:
+                    if line.startswith('SUMMARY:'):
+                        current_event['summary'] = line[8:]
+                    elif line.startswith('DTSTART:'):
+                        dt_str = line[8:]
+                        if len(dt_str) >= 13:
+                            # Format czasu: 20250402T104000
+                            time_str = dt_str[9:11] + ':' + dt_str[11:13]
+                            current_event['od'] = time_str
+                    elif line.startswith('DTEND:'):
+                        dt_str = line[6:]
+                        if len(dt_str) >= 13:
+                            # Format czasu: 20250402T121000
+                            time_str = dt_str[9:11] + ':' + dt_str[11:13]
+                            current_event['do_'] = time_str
+                    elif line.startswith('LOCATION:'):
+                        current_event['miejsce'] = line[9:]
+                    elif line.startswith('CATEGORIES:'):
+                        current_event['rz'] = line[11:]
+
+            # Zapisz zdarzenia do bazy danych
+            for event in events:
+                if 'summary' in event and 'od' in event and 'do_' in event:
+                    summary = event['summary']
+
+                    # Wyciągnij przedmiot i nauczyciela
+                    match = re.search(r'(.*?)\s*\(([^)]*)\):\s*(.*)', summary)
+                    if match:
+                        przedmiot = match.group(1).strip()
+                        rz = match.group(2).strip()
+                        nauczyciel_name = match.group(3).strip()
+
+                        # Znajdź lub dodaj nauczyciela
+                        nauczyciel_id = None
+                        if nauczyciel_name:
+                            nauczyciel = {
+                                'imie_nazwisko': nauczyciel_name,
+                                'instytut': 'Nieznany',  # Domyślna wartość
+                                'link_planu': ''  # Zostanie uzupełnione później
+                            }
+                            nauczyciel_id = self.db.upsert_nauczyciel(nauczyciel)
+
+                        # Dodaj wpis do planu
+                        plan_entry = {
+                            'grupa_id': grupa_id,
+                            'link_ics': event.get('link_ics', ''),
+                            'nauczyciel_id': nauczyciel_id,
+                            'od': event.get('od', ''),
+                            'do_': event.get('do_', ''),
+                            'przedmiot': przedmiot,
+                            'rz': event.get('rz', rz),
+                            'miejsce': event.get('miejsce', '')
+                        }
+
+                        plan_id = self.db.upsert_plan_grupy(plan_entry)
+                        if plan_id:
+                            updated_count += 1
+
+            return updated_count
+        except Exception as e:
+            logger.error(f"Błąd podczas parsowania pliku ICS: {str(e)}")
             return 0

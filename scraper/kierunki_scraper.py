@@ -32,7 +32,7 @@ class KierunkiScraper:
                 logger.error("Nie znaleziono głównej listy grup")
                 return 0
 
-            # Znajdź wydziały (bezpośrednie elementy li w głównej liście)
+            # Znajdź elementy li dla wydziałów
             wydzialy_items = main_list.find_all('li', class_='list-group-item', recursive=False)
 
             logger.info(f"Znaleziono {len(wydzialy_items)} wydziałów")
