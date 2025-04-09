@@ -66,6 +66,7 @@ class GrupyScraper:
     def worker(self):
         """Funkcja pracownika dla wątku."""
         while True:
+            # noinspection PyBroadException,PyUnusedLocal
             try:
                 kierunek = self.task_queue.get(block=False)
                 updated_count = self.scrape_kierunek(kierunek)
@@ -80,8 +81,10 @@ class GrupyScraper:
 
     def scrape_kierunek(self, kierunek):
         """Scrapuje grupy dla konkretnego kierunku."""
+        # noinspection PyBroadException,PyUnusedLocal
         try:
             link_grupy = kierunek.get('link_grupy', '')
+            # noinspection PyUnusedLocal
             nazwa_kierunku = kierunek.get('nazwa_kierunku', 'Nieznany kierunek')
 
             # Sprawdzenie czy link jest prawidłowy

@@ -76,6 +76,7 @@ class NauczycieleScraper:
     def worker(self):
         """Funkcja pracownika dla wątku."""
         while True:
+            # noinspection PyBroadException
             try:
                 imie_nazwisko, href, instytut = self.task_queue.get(block=False)
                 success = self.scrape_nauczyciel(imie_nazwisko, href, instytut)
@@ -91,6 +92,7 @@ class NauczycieleScraper:
 
     def scrape_nauczyciel(self, imie_nazwisko, href, instytut):
         """Scrapuje informacje o pojedynczym nauczycielu."""
+        # noinspection PyBroadException
         try:
             link_planu = href
             if isinstance(link_planu, str) and not link_planu.startswith('http'):

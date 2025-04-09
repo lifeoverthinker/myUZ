@@ -38,7 +38,8 @@ class PlanyScraper:
 
             # Pobieranie grup z bazy danych
             grupy = self.db.get_all_grupy()
-            logger.info("Znaleziono {len(grupy)} grup do scrapowania")
+            # noinspection PyCompatibility
+            logger.info(f"Znaleziono {len(grupy)} grup do scrapowania")
 
             # Dodaj grupy do kolejki
             for grupa in grupy:
@@ -55,10 +56,12 @@ class PlanyScraper:
             # Czekaj na zakończenie wszystkich wątków
             self.task_queue.join()
 
-            logger.info("Zakończono scrapowanie planów. Zaktualizowano {self.total_updated} zajęć")
+            # noinspection PyCompatibility
+            logger.info(f"Zakończono scrapowanie planów. Zaktualizowano {self.total_updated} zajęć")
             return self.total_updated
         except Exception as e:
-            logger.error("Błąd podczas scrapowania planów: {str(e)}")
+            # noinspection PyCompatibility
+            logger.error(f"Błąd podczas scrapowania planów: {str(e)}")
             raise e
 
     def worker(self):
@@ -73,7 +76,8 @@ class PlanyScraper:
             except queue.Empty:
                 break
             except Exception as e:
-                logger.error("Błąd w wątku scrapowania planów: {str(e)}")
+                # noinspection PyCompatibility
+                logger.error(f"Błąd w wątku scrapowania planów: {str(e)}")
                 self.task_queue.task_done()
 
     def scrape_plan(self, grupa):
@@ -84,7 +88,8 @@ class PlanyScraper:
 
             # Sprawdzenie czy link jest prawidłowy
             if not link_plan or not isinstance(link_plan, str):
-                logger.warning("Brak lub nieprawidłowy link dla grupy {nazwa_grupy}")
+                # noinspection PyCompatibility
+                logger.warning(f"Brak lub nieprawidłowy link dla grupy {nazwa_grupy}")
                 return 0
 
             # Pobieranie strony z planem
@@ -94,18 +99,21 @@ class PlanyScraper:
             # Pobieranie tabeli z planem zajęć
             table = soup.select_one('table.tabela')
             if not table:
-                logger.warning("Nie znaleziono tabeli z planem dla grupy {nazwa_grupy}")
+                # noinspection PyCompatibility
+                logger.warning(f"Nie znaleziono tabeli z planem dla grupy {nazwa_grupy}")
                 return 0
 
             # Analiza planu zajęć i zapisanie do bazy danych
             updated_count = self._parse_plan_table(table, grupa)
 
+            # noinspection PyCompatibility
             logger.info(
-                "Scrapowanie zakończone dla grupy {nazwa_grupy}. Zaktualizowano {updated_count} zajęć.")
+                f"Scrapowanie zakończone dla grupy {nazwa_grupy}. Zaktualizowano {updated_count} zajęć.")
             return updated_count
         except Exception as e:
+            # noinspection PyCompatibility
             logger.error(
-                "Błąd podczas scrapowania planu dla grupy {grupa.get('nazwa_grupy', 'Nieznana')}: {str(e)}")
+                f"Błąd podczas scrapowania planu dla grupy {grupa.get('nazwa_grupy', 'Nieznana')}: {str(e)}")
             return 0
 
     def _parse_plan_table(self, table, grupa):
@@ -155,11 +163,12 @@ class PlanyScraper:
                         sala = sala_element.text.strip() if sala_element else None
 
                         # Tworzenie rekordu zajęć
+                        # noinspection PyCompatibility
                         zajecia = {
                             "grupa_id": grupa.get('id'),
                             "dzien_tygodnia": day,
-                            "godzina_start": "{start_hour:02d}:{start_min:02d}",
-                            "godzina_koniec": "{end_hour:02d}:{end_min:02d}",
+                            "godzina_start": f"{start_hour:02d}:{start_min:02d}",
+                            "godzina_koniec": f"{end_hour:02d}:{end_min:02d}",
                             "nazwa_zajec": nazwa_zajec,
                             "prowadzacy": prowadzacy,
                             "sala": sala
@@ -171,5 +180,6 @@ class PlanyScraper:
 
             return updated_count
         except Exception as e:
-            logger.error("Błąd podczas parsowania tabeli planu: {str(e)}")
+            # noinspection PyCompatibility
+            logger.error(f"Błąd podczas parsowania tabeli planu: {str(e)}")
             return 0

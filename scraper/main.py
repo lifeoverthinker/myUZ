@@ -23,7 +23,7 @@ logger = logging.getLogger('UZ_Scraper')
 def main():
     parser = argparse.ArgumentParser(description='UZ Scraper')
 
-    # Nowe parametry dla Supabase
+    # Parametry dla Supabase
     parser.add_argument('--supabase-url', default=os.environ.get('SUPABASE_URL', ''),
                         help='URL Supabase')
     parser.add_argument('--supabase-key', default=os.environ.get('SUPABASE_SERVICE_ROLE_KEY', ''),
@@ -44,7 +44,8 @@ def main():
         return
 
     # Pokaż informacje o połączeniu (bez klucza)
-    logger.info("Łączenie z bazą danych Supabase: {}".format(args.supabase_url))
+    # noinspection PyCompatibility
+    logger.info(f"Łączenie z bazą danych Supabase: {args.supabase_url}")
 
     # Inicjalizacja połączenia z bazą danych
     try:
@@ -53,11 +54,13 @@ def main():
             supabase_key=args.supabase_key
         )
     except Exception as e:
-        logger.error("Błąd połączenia z bazą danych: {}".format(str(e)))
+        # noinspection PyCompatibility
+        logger.error(f"Błąd połączenia z bazą danych: {str(e)}")
         raise
 
     base_url = args.base_url
-    logger.info("Używam base_url: {}".format(base_url))
+    # noinspection PyCompatibility
+    logger.info(f"Używam base_url: {base_url}")
 
     # Inicjalizacja scraperów z przekazaniem base_url
     kierunki_scraper = KierunkiScraper(db, base_url)
@@ -69,23 +72,28 @@ def main():
         # Uruchomienie scraperów
         logger.info("Scrapowanie kierunków...")
         kierunki_count = kierunki_scraper.scrape_and_save()
-        logger.info("Zaktualizowano {} kierunków.".format(kierunki_count))
+        # noinspection PyCompatibility
+        logger.info(f"Zaktualizowano {kierunki_count} kierunków.")
 
         logger.info("Scrapowanie grup...")
         grupy_count = grupy_scraper.scrape_and_save()
-        logger.info("Zaktualizowano {} grup.".format(grupy_count))
+        # noinspection PyCompatibility
+        logger.info(f"Zaktualizowano {grupy_count} grup.")
 
         logger.info("Scrapowanie nauczycieli...")
         nauczyciele_count = nauczyciele_scraper.scrape_and_save()
-        logger.info("Zaktualizowano {} nauczycieli.".format(nauczyciele_count))
+        # noinspection PyCompatibility
+        logger.info(f"Zaktualizowano {nauczyciele_count} nauczycieli.")
 
         logger.info("Scrapowanie planów...")
         plany_count = plany_scraper.scrape_and_save()
-        logger.info("Zaktualizowano {} wpisów w planach.".format(plany_count))
+        # noinspection PyCompatibility
+        logger.info(f"Zaktualizowano {plany_count} wpisów w planach.")
 
         logger.info("Scrapowanie zakończone pomyślnie!")
     except Exception as e:
-        logger.error("Wystąpił błąd: {}".format(str(e)))
+        # noinspection PyCompatibility
+        logger.error(f"Wystąpił błąd: {str(e)}")
     finally:
         db.close()
 

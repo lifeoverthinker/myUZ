@@ -41,7 +41,8 @@ class KierunkiScraper:
 
             # Wyszukanie linków do wydziałów
             wydzialy_links = soup.select('div.container a[href*="grupy_lista.php"]')
-            logger.info("Znaleziono {len(wydzialy_links)} wydziałów")
+            # noinspection PyCompatibility
+            logger.info(f"Znaleziono {len(wydzialy_links)} wydziałów")
 
             # Dodaj wydziały do kolejki
             for link in wydzialy_links:
@@ -58,11 +59,13 @@ class KierunkiScraper:
             # Czekaj na zakończenie wszystkich wątków
             self.task_queue.join()
 
+            # noinspection PyCompatibility
             logger.info(
-                "Zakończono scrapowanie kierunków. Zaktualizowano {self.total_updated} kierunków")
+                f"Zakończono scrapowanie kierunków. Zaktualizowano {self.total_updated} kierunków")
             return self.total_updated
         except Exception as e:
-            logger.error("Błąd podczas scrapowania kierunków: {str(e)}")
+            # noinspection PyCompatibility
+            logger.error(f"Błąd podczas scrapowania kierunków: {str(e)}")
             raise e
 
     def worker(self):
@@ -77,7 +80,8 @@ class KierunkiScraper:
             except queue.Empty:
                 break
             except Exception as e:
-                logger.error("Błąd w wątku scrapowania kierunków: {str(e)}")
+                # noinspection PyCompatibility
+                logger.error(f"Błąd w wątku scrapowania kierunków: {str(e)}")
                 self.task_queue.task_done()
 
     def scrape_wydzial(self, link, nazwa_wydzialu):
@@ -85,7 +89,8 @@ class KierunkiScraper:
         try:
             url = link
             if isinstance(url, str) and not url.startswith('http'):
-                url = "{self.base_url}/{KierunkiScraper.fix_url(url)}"
+                # noinspection PyCompatibility
+                url = f"{self.base_url}/{KierunkiScraper.fix_url(url)}"
 
             response = self.session.get(url)
             soup = BeautifulSoup(response.content, 'html.parser')
@@ -99,9 +104,11 @@ class KierunkiScraper:
 
                 if isinstance(href, str) and not href.startswith('http'):
                     if href.startswith('/'):
-                        href = "{self.base_url}{href}"
+                        # noinspection PyCompatibility
+                        href = f"{self.base_url}{href}"
                     else:
-                        href = "{self.base_url}/{href}"
+                        # noinspection PyCompatibility
+                        href = f"{self.base_url}/{href}"
 
                 kierunek = {
                     "nazwa_kierunku": nazwa_kierunku,
@@ -112,9 +119,11 @@ class KierunkiScraper:
                 self.db.upsert_kierunek(kierunek)
                 updated_count += 1
 
+            # noinspection PyCompatibility
             logger.info(
-                "Scrapowanie zakończone dla wydziału {nazwa_wydzialu}. Zaktualizowano {updated_count} kierunków.")
+                f"Scrapowanie zakończone dla wydziału {nazwa_wydzialu}. Zaktualizowano {updated_count} kierunków.")
             return updated_count
         except Exception as e:
-            logger.error("Błąd podczas scrapowania wydziału {nazwa_wydzialu}: {str(e)}")
+            # noinspection PyCompatibility
+            logger.error(f"Błąd podczas scrapowania wydziału {nazwa_wydzialu}: {str(e)}")
             return 0
