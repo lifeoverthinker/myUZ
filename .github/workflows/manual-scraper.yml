@@ -6,7 +6,7 @@ on:
       scrape_type:
         description: 'Co chcesz scrapować?'
         required: true
-        default: 'plany-grup'
+        default: 'aktualizacja-przedmiotow'
         type: choice
         options:
           - all
@@ -15,6 +15,7 @@ on:
           - plany-grup
           - plany-nauczycieli
           - nauczyciele
+          - aktualizacja-przedmiotow
       max_items:
         description: 'Maksymalna liczba elementów (0 = wszystkie)'
         required: false
@@ -51,6 +52,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r scraper/requirements.txt
 
+      - name: Fix imports in plany_scraper.py
+        run: |
+          echo "Fixing imports in plany_scraper.py..."
+          sed -i 's/from utils import/from scraper.utils import/g' scraper/plany_scraper.py
+          echo "Import paths fixed"
+
       - name: Create scraper_config.py
         run: |
           cat > scraper/scraper_config.py << 'EOF'
@@ -58,7 +65,7 @@ jobs:
           import os
           
           # Parametry pobrane z GitHub Actions
-          MAX_ITEMS = ${{ inputs.max_items }}
+          MAX_ITEMS = max(0, ${{ inputs.max_items }})  # Zawsze co najmniej 0
           SLEEP_TIME = ${{ inputs.sleep_time }}
           COLLECT_TEACHERS = ${{ inputs.collect_teachers == 'true' && 'True' || 'False' }}
           
@@ -74,6 +81,103 @@ jobs:
               """Używa niestandardowego czasu uśpienia"""
               import time
               time.sleep(SLEEP_TIME)
+          EOF
+
+      - name: Create update_subjects_script.py
+        run: |
+          cat > update_subjects_script.py << 'EOF'
+          # Skrypt do aktualizacji danych przedmiotów i RZ w bazie
+          import re
+          import sys
+          import time
+          from tqdm import tqdm
+          from scraper.db import Database, get_all_zajecia
+          from scraper.scraper_config import MAX_ITEMS, SLEEP_TIME, get_limited_items, custom_sleep
+          
+          # Patch dla time.sleep
+          original_sleep = time.sleep
+          time.sleep = lambda x: custom_sleep()
+          
+          def extract_subject_and_rz(summary):
+              """
+              Wyciąga czystą nazwę przedmiotu i rodzaj zajęć z tytułu wydarzenia.
+              Wyciąga dowolny tekst z nawiasów jako rodzaj zajęć.
+              """
+              if not summary:
+                  return None, None
+          
+              # Wzorzec: Nazwa przedmiotu (RZ): Prowadzący
+              # lub: Nazwa przedmiotu (RZ)
+              # Wyciąga dowolny tekst z nawiasów jako RZ
+              match = re.search(r'^(.+?)\s*\(([^)]+)\).*$', summary)
+              if match:
+                  subject_name = match.group(1).strip()
+                  rz = match.group(2).strip()
+                  return subject_name, rz
+          
+              # Jeśli nie znaleźliśmy dopasowania, zwracamy oryginalny tekst i None
+              return summary, None
+          
+          def update_subjects_and_rz():
+              """
+              Aktualizuje dane przedmiotów i RZ dla istniejących zajęć w bazie.
+              """
+              print("Inicjalizacja połączenia z bazą danych...")
+              try:
+                  Database.initialize()
+              except Exception as e:
+                  print(f"Błąd podczas inicjalizacji bazy danych: {e}")
+                  sys.exit(1)
+          
+              print("Pobieranie wszystkich zajęć z bazy...")
+              all_zajecia = get_all_zajecia()
+          
+              if not all_zajecia:
+                  print("Nie znaleziono zajęć w bazie danych!")
+                  return
+          
+              print(f"Znaleziono {len(all_zajecia)} zajęć.")
+          
+              if MAX_ITEMS > 0:
+                  all_zajecia = get_limited_items(all_zajecia, MAX_ITEMS)
+                  print(f"Ograniczono do {len(all_zajecia)} zajęć.")
+          
+              updated_count = 0
+              updated_with_rz = 0
+              skipped_count = 0
+          
+              for zajecie in tqdm(all_zajecia, desc="Aktualizacja przedmiotów i RZ"):
+                  try:
+                      zajecie_id = zajecie.get('id')
+                      nazwa = zajecie.get('nazwa')
+          
+                      if not nazwa:
+                          skipped_count += 1
+                          continue
+          
+                      # Ekstrahujemy przedmiot i RZ z nazwy
+                      przedmiot, rz = extract_subject_and_rz(nazwa)
+          
+                      # Aktualizujemy dane w bazie
+                      supabase = Database.client
+                      result = supabase.table('zajecia').update({
+                          'przedmiot': przedmiot,
+                          'rz': rz
+                      }).eq('id', zajecie_id).execute()
+          
+                      updated_count += 1
+                      if rz:
+                          updated_with_rz += 1
+          
+                  except Exception as e:
+                      print(f"Błąd podczas aktualizacji zajęcia (ID: {zajecie.get('id')}): {e}")
+          
+              print(f"\nZaktualizowano {updated_count} zajęć.")
+              print(f"Z tego {updated_with_rz} zajęć ma wypełnione pole RZ.")
+              print(f"Pominięto {skipped_count} zajęć (brak nazwy).")
+          
+          if __name__ == "__main__":
+              update_subjects_and_rz()
           EOF
 
       - name: Create run_scraper.py
@@ -111,7 +215,16 @@ jobs:
               print(f"Błąd podczas inicjalizacji bazy danych: {e}")
               sys.exit(1)
           
-          # Uruchom wybrany typ scrapowania
+          # Specjalna opcja dla aktualizacji przedmiotów i RZ
+          if scrape_type == "aktualizacja-przedmiotow":
+              print("\n=== Aktualizacja danych przedmiotów i RZ ===")
+              # Importujemy i uruchamiamy funkcję z naszego osobnego skryptu
+              from update_subjects_script import update_subjects_and_rz
+              update_subjects_and_rz()
+              print("\n=== Zakończono aktualizację ===")
+              sys.exit(0)  # Kończymy działanie skryptu
+          
+          # Standardowe opcje scrapowania
           if scrape_type == "all" or scrape_type == "kierunki":
               from scraper.kierunki_scraper import scrape_kierunki
               print("\n=== Scrapowanie kierunków ===")
