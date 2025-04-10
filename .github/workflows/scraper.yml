@@ -2,28 +2,315 @@ name: Run UZ Scraper
 
 on:
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '0 3 * * *'  # Codziennie o 3:00 UTC
   workflow_dispatch:  # Możliwość ręcznego uruchomienia
+    inputs:
+      max_items:
+        description: 'Maksymalna liczba elementów (0 = wszystkie)'
+        required: false
+        default: '0'
+        type: number
+      sleep_time:
+        description: 'Opóźnienie między żądaniami (sekundy)'
+        required: false
+        default: '0.1'
+        type: number
+      scrape_type:
+        description: 'Co scrapować'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - kierunki
+          - grupy
+          - nauczyciele
+          - plany-grup
+          - plany-nauczycieli
+          - aktualizacja-przedmiotow
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 720  # 12 godzin maksymalnie
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r scraper/requirements.txt
 
+      - name: Fix imports in scraper files
+        run: |
+          echo "Naprawianie importów w plikach scrapera..."
+          # Napraw import w plany_scraper.py
+          sed -i 's/from utils import/from scraper.utils import/g' scraper/plany_scraper.py
+          
+          # Napraw importy w innych plikach jeśli korzystają z importów względnych
+          sed -i 's/from \.utils/from scraper.utils/g' scraper/*.py
+          sed -i 's/from \.db/from scraper.db/g' scraper/*.py
+          echo "Importy naprawione"
+
+      - name: Create scraper_config.py
+        run: |
+          # Jeśli uruchomiono workflow ręcznie, użyj parametrów, w przeciwnym razie wartości domyślnych
+          MAX_ITEMS=${{ github.event.inputs.max_items || 0 }}
+          SLEEP_TIME=${{ github.event.inputs.sleep_time || 0.1 }}
+          SCRAPE_TYPE="${{ github.event.inputs.scrape_type || 'all' }}"
+          
+          cat > scraper/scraper_config.py << EOF
+          # Dynamicznie generowany plik konfiguracyjny
+          import os
+          
+          # Parametry scrapera
+          MAX_ITEMS = max(0, $MAX_ITEMS)
+          SLEEP_TIME = $SLEEP_TIME
+          SCRAPE_TYPE = "$SCRAPE_TYPE"
+          COLLECT_TEACHERS = True
+          
+          # Funkcje pomocnicze
+          def get_limited_items(items_list, max_items=MAX_ITEMS):
+              """Zwraca ograniczoną liczbę elementów (0 = wszystkie)"""
+              if max_items <= 0:
+                  return items_list
+              return items_list[:max_items]
+          
+          # Zastępuje domyślne time.sleep
+          def custom_sleep():
+              """Używa niestandardowego czasu uśpienia"""
+              import time
+              time.sleep(SLEEP_TIME)
+          EOF
+
+      - name: Create run_scraper.py
+        run: |
+          cat > run_scraper.py << 'EOF'
+          # Skrypt uruchamiający wybraną część scrapera
+          import sys
+          import time
+          import os
+          import re
+          from tqdm import tqdm
+          
+          # Przekazujemy zmienną środowiskową pod obydwiema nazwami
+          if 'SUPABASE_KEY' in os.environ and 'SUPABASE_SERVICE_ROLE_KEY' not in os.environ:
+              os.environ['SUPABASE_SERVICE_ROLE_KEY'] = os.environ['SUPABASE_KEY']
+          
+          from scraper.db import Database
+          from scraper.scraper_config import MAX_ITEMS, SLEEP_TIME, SCRAPE_TYPE, COLLECT_TEACHERS, get_limited_items, custom_sleep
+          
+          # Patch dla time.sleep w utils.py
+          import scraper.utils
+          original_sleep = time.sleep
+          time.sleep = lambda x: custom_sleep()
+          
+          print(f"Uruchamianie scrapera: {SCRAPE_TYPE}")
+          print(f"Konfiguracja: MAX_ITEMS={MAX_ITEMS}, SLEEP_TIME={SLEEP_TIME}")
+          
+          # Inicjalizacja bazy danych
+          print("Inicjalizacja połączenia z bazą danych...")
+          try:
+              Database.initialize()
+          except Exception as e:
+              print(f"Błąd podczas inicjalizacji bazy danych: {e}")
+              sys.exit(1)
+          
+          # Dodajmy funkcję do aktualizacji przedmiotów i RZ
+          def extract_subject_and_rz(summary):
+              if not summary:
+                  return None, None
+          
+              # Wzorzec: Nazwa przedmiotu (RZ): Prowadzący
+              # lub: Nazwa przedmiotu (RZ)
+              match = re.search(r'^(.+?)\s*\(([^)]+)\).*$', summary)
+              if match:
+                  subject_name = match.group(1).strip()
+                  rz = match.group(2).strip()
+                  return subject_name, rz
+          
+              return summary, None
+          
+          # Opcja aktualizacji przedmiotów
+          if SCRAPE_TYPE == "aktualizacja-przedmiotow":
+              print("\n=== Aktualizacja danych przedmiotów i RZ ===")
+              # Bezpośrednio wykonujemy aktualizację
+          
+              print("Pobieranie zajęć z bazy...")
+              supabase = Database.client
+          
+              try:
+                  query = supabase.table('zajecia').select('*')
+                  if MAX_ITEMS > 0:
+                      query = query.limit(MAX_ITEMS)
+          
+                  response = query.execute()
+                  all_zajecia = response.data
+          
+                  if not all_zajecia:
+                      print("Nie znaleziono zajęć w bazie danych!")
+                      sys.exit(0)
+          
+                  print(f"Znaleziono {len(all_zajecia)} zajęć.")
+          
+                  updated_count = 0
+                  updated_with_rz = 0
+          
+                  for zajecie in tqdm(all_zajecia, desc="Aktualizacja przedmiotów i RZ"):
+                      try:
+                          zajecie_id = zajecie.get('id')
+                          nazwa = zajecie.get('nazwa')
+          
+                          if not nazwa:
+                              continue
+          
+                          # Ekstrahujemy przedmiot i RZ z nazwy
+                          przedmiot, rz = extract_subject_and_rz(nazwa)
+          
+                          # Aktualizujemy dane w bazie
+                          result = supabase.table('zajecia').update({
+                              'przedmiot': przedmiot,
+                              'rz': rz
+                          }).eq('id', zajecie_id).execute()
+          
+                          updated_count += 1
+                          if rz:
+                              updated_with_rz += 1
+          
+                      except Exception as e:
+                          print(f"Błąd podczas aktualizacji zajęcia (ID: {zajecie.get('id')}): {e}")
+          
+                  print(f"\nZaktualizowano {updated_count} zajęć.")
+                  print(f"Z tego {updated_with_rz} zajęć ma wypełnione pole RZ.")
+          
+              except Exception as e:
+                  print(f"Błąd podczas aktualizacji danych: {e}")
+                  sys.exit(1)
+          
+              print("\n=== Zakończono aktualizację ===")
+              sys.exit(0)
+          
+          # Standardowe opcje scrapowania
+          if SCRAPE_TYPE == "all" or SCRAPE_TYPE == "kierunki":
+              from scraper.kierunki_scraper import scrape_kierunki
+              print("\n=== Scrapowanie kierunków ===")
+              kierunki = scrape_kierunki()
+              if MAX_ITEMS > 0:
+                  kierunki = get_limited_items(kierunki, MAX_ITEMS)
+          
+          if SCRAPE_TYPE == "all" or SCRAPE_TYPE == "grupy":
+              from scraper.grupy_scraper import scrape_grupy
+              print("\n=== Scrapowanie grup ===")
+              if "kierunki" in locals():
+                  grupy = scrape_grupy(kierunki)
+              else:
+                  grupy = scrape_grupy()
+              if MAX_ITEMS > 0:
+                  grupy = get_limited_items(grupy, MAX_ITEMS)
+          
+          if SCRAPE_TYPE == "all" or SCRAPE_TYPE == "nauczyciele":
+              from scraper.db import get_all_grupy
+              import re
+          
+              print("\n=== Scrapowanie nauczycieli z planów grup ===")
+              from scraper.utils import get_soup, clean_text, normalize_url
+              from scraper.db import insert_nauczyciel
+          
+              grupy_lista = get_all_grupy()
+              if MAX_ITEMS > 0:
+                  grupy_lista = get_limited_items(grupy_lista, MAX_ITEMS)
+          
+              nauczyciele_dict = {}
+          
+              for grupa in grupy_lista:
+                  try:
+                      link_planu = grupa['link_planu'] if isinstance(grupa, dict) else grupa.link_planu
+                      soup = get_soup(link_planu)
+                      if not soup:
+                          continue
+          
+                      teacher_links = soup.find_all('a', href=lambda href: href and 'nauczyciel_plan.php?ID=' in href)
+          
+                      for teacher_link in teacher_links:
+                          try:
+                              teacher_name = clean_text(teacher_link.get_text())
+                              teacher_href = teacher_link.get('href')
+          
+                              if not teacher_href:
+                                  continue
+          
+                              teacher_id_match = re.search(r'ID=(\d+)', teacher_href)
+                              if not teacher_id_match:
+                                  continue
+          
+                              teacher_id = teacher_id_match.group(1)
+                              if teacher_id in nauczyciele_dict:
+                                  continue
+          
+                              teacher_link_full = normalize_url(teacher_href)
+                              nauczyciele_dict[teacher_id] = {
+                                  'id': teacher_id,
+                                  'imie_nazwisko': teacher_name,
+                                  'link_planu': teacher_link_full
+                              }
+          
+                              insert_nauczyciel(teacher_name, None, None, teacher_link_full)
+                              print(f"Dodano nauczyciela: {teacher_name}")
+                          except Exception as e:
+                              print(f"Błąd podczas przetwarzania nauczyciela: {e}")
+                  except Exception as e:
+                      print(f"Błąd podczas przetwarzania grupy: {e}")
+          
+              print(f"Zakończono scrapowanie nauczycieli. Znaleziono {len(nauczyciele_dict)} nauczycieli.")
+          
+          if SCRAPE_TYPE == "all" or SCRAPE_TYPE == "plany-grup":
+              from scraper.plany_scraper import scrape_plany_grup
+              from scraper.db import get_all_grupy
+          
+              print("\n=== Scrapowanie planów grup ===")
+              grupy_lista = get_all_grupy()
+              if MAX_ITEMS > 0:
+                  grupy_lista = get_limited_items(grupy_lista, MAX_ITEMS)
+          
+              scrape_plany_grup(grupy_lista=grupy_lista, collect_teachers=COLLECT_TEACHERS)
+          
+          if SCRAPE_TYPE == "all" or SCRAPE_TYPE == "plany-nauczycieli":
+              from scraper.plany_scraper import scrape_plany_nauczycieli
+              from scraper.db import get_all_nauczyciele
+          
+              print("\n=== Scrapowanie planów nauczycieli ===")
+              nauczyciele_lista = get_all_nauczyciele()
+              if MAX_ITEMS > 0:
+                  nauczyciele_lista = get_limited_items(nauczyciele_lista, MAX_ITEMS)
+          
+              scrape_plany_nauczycieli(nauczyciele_lista=nauczyciele_lista)
+          
+          print("\n=== Zakończono scrapowanie ===")
+          EOF
+
       - name: Run scraper
+        run: python run_scraper.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python scraper/main.py
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "# Podsumowanie scrapowania" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Data uruchomienia: $(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_STEP_SUMMARY
+          echo "- Typ scrapowania: ${{ github.event.inputs.scrape_type || 'all' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Maksymalna liczba elementów: ${{ github.event.inputs.max_items || '0' }} (0 = wszystkie)" >> $GITHUB_STEP_SUMMARY
+          echo "- Opóźnienie między żądaniami: ${{ github.event.inputs.sleep_time || '0.1' }}s" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Sprawdź logi powyżej, aby zobaczyć szczegółowe informacje o przebiegu scrapowania." >> $GITHUB_STEP_SUMMARY
