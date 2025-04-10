@@ -1,108 +1,131 @@
-import requests
-from bs4 import BeautifulSoup
-import logging
+# Moduł do scrapowania grup studentów
 import re
-from urllib.parse import urlparse, parse_qs
+from utils import get_soup, clean_text, normalize_url, BASE_URL, print_progress
+from db import insert_grupa, get_all_kierunki
 
-logger = logging.getLogger('UZ_Scraper.Grupy')
+def extract_grupa_info(text):
+    """Wyciąga informacje o grupie z jej nazwy"""
+    # Przykładowy format: "21AW-SP Architektura wnętrz / stacjonarne / pierwszego stopnia z tyt. licencjata"
+    kod_grupy = None
+    tryb_studiow = None
 
+    # Wyciągnięcie kodu grupy (pierwsza część tekstu do spacji)
+    if text:
+        parts = text.strip().split(' ', 1)
+        if len(parts) > 0:
+            kod_grupy = parts[0].strip()
 
-class GrupyScraper:
-    def __init__(self, db, base_url):
-        self.db = db
-        self.base_url = base_url
-        self.total_updated = 0
+        # Wyciągnięcie trybu studiów
+        tryb_match = re.search(r'\s/\s(stacjonarne|niestacjonarne)\s/', text)
+        if tryb_match:
+            tryb_studiow = tryb_match.group(1).strip()
 
-    def scrape_and_save(self):
-        """Scrapuje i zapisuje grupy do bazy danych."""
-        logger.info("Rozpoczęto scrapowanie grup zajęciowych")
+    return kod_grupy, tryb_studiow
 
-        # Pobierz kierunki z bazy danych
-        kierunki = self.db.get_kierunki()
+def extract_semester_from_plan(soup):
+    """Wyciąga informację o semestrze z nagłówka strony planu zajęć"""
+    if not soup:
+        return None
 
-        logger.info(f"Znaleziono {len(kierunki)} kierunków do scrapowania")
+    # Szukamy nagłówka H3, który zawiera informację o semestrze
+    h3_tags = soup.find_all('h3')
+    for h3 in h3_tags:
+        text = clean_text(h3.get_text())
+        # Szukamy informacji o semestrze
+        if 'semestr' in text.lower():
+            semester_match = re.search(r'semestr\s+(letni|zimowy)', text.lower())
+            if semester_match:
+                return semester_match.group(1)
 
-        for kierunek in kierunki:
-            # Pobierz ID kierunku z linku
-            link_grupy = kierunek.get('link_grupy', '')
-            if not link_grupy:
-                continue
+    # Jeśli nie znaleziono w H3, szukamy również w innych elementach
+    body_text = clean_text(soup.get_text())
+    semester_match = re.search(r'semestr\s+(letni|zimowy)', body_text.lower())
+    if semester_match:
+        return semester_match.group(1)
 
-            # Wyciągnij ID kierunku z URL
-            parsed_url = urlparse(link_grupy)
-            query_params = parse_qs(parsed_url.query)
-            kierunek_id_url = query_params.get('ID', [''])[0]
+    return None
 
-            if not kierunek_id_url:
-                continue
+def scrape_grupy(kierunki_lista=None):
+    """Scrapuje grupy dla podanych kierunków"""
+    print("\nRozpoczynam scrapowanie grup...")
 
-            logger.info(
-                f"Przetwarzanie kierunku: {kierunek['nazwa_kierunku']}, ID URL: {kierunek_id_url}")
+    # Jeśli nie podano listy kierunków, pobierz wszystkie kierunki z bazy
+    if not kierunki_lista:
+        kierunki_lista = get_all_kierunki()
 
+    if not kierunki_lista:
+        print("Brak kierunków do scrapowania grup")
+        return []
+
+    total_kierunki = len(kierunki_lista)
+    all_grupy = []
+
+    for i, kierunek in enumerate(kierunki_lista, 1):
+        kierunek_id = kierunek['id'] if isinstance(kierunek, dict) else kierunek.id
+        link_grupy = kierunek['link_grupy'] if isinstance(kierunek, dict) else kierunek.link_grupy
+        nazwa_kierunku = kierunek['nazwa'] if isinstance(kierunek, dict) and 'nazwa' in kierunek else (
+            kierunek['nazwa_kierunku'] if isinstance(kierunek, dict) else kierunek.nazwa_kierunku
+        )
+
+        print(f"\n[{i}/{total_kierunki}] Scrapowanie grup dla kierunku: {nazwa_kierunku}")
+
+        # Pobierz stronę z listą grup dla kierunku
+        soup = get_soup(link_grupy)
+        if not soup:
+            print(f"Nie udało się pobrać listy grup dla kierunku: {nazwa_kierunku}")
+            continue
+
+        # Znajdujemy wszystkie wiersze w tabeli (odd i even)
+        rows = soup.find_all('tr', class_=['odd', 'even'])
+        total_grupy = len(rows)
+
+        if not rows:
+            print(f"Nie znaleziono grup dla kierunku: {nazwa_kierunku}")
+            continue
+
+        for j, row in enumerate(rows, 1):
             try:
-                # Pełny URL do listy grup
-                grupy_url = f"{self.base_url}/grupy_lista_grup_kierunku.php?ID={kierunek_id_url}"
-                response = requests.get(grupy_url)
-
-                if response.status_code != 200:
-                    logger.error(f"Błąd HTTP {response.status_code} dla URL: {grupy_url}")
+                # Znajdź link do planu grupy
+                link = row.find('a')
+                if not link:
+                    print_progress(j, total_grupy, f"Brak linku dla wiersza {j}")
                     continue
 
-                soup = BeautifulSoup(response.text, 'html.parser')
-                table = soup.find('table', {'class': 'table table-bordered table-condensed'})
+                text = clean_text(link.get_text())
+                link_href = link.get('href')
 
-                if not table:
-                    logger.warning(
-                        f"Nie znaleziono tabeli grup dla kierunku: {kierunek['nazwa_kierunku']}")
+                if not link_href:
+                    print_progress(j, total_grupy, f"Brak href dla linku: {text}")
                     continue
 
-                rows = table.find_all('tr')
+                # Wyciągnięcie podstawowych informacji o grupie
+                kod_grupy, tryb_studiow = extract_grupa_info(text)
+                link_planu = normalize_url(link_href)
 
-                for row in rows:
-                    # Znajdujemy jedyną komórkę w wierszu
-                    cell = row.find('td')
-                    if not cell:
-                        continue
+                # Pobierz stronę z planem grupy, aby wyodrębnić semestr
+                plan_soup = get_soup(link_planu)
+                semestr = extract_semester_from_plan(plan_soup)
 
-                    # Znajdujemy link w komórce
-                    link = cell.find('a')
-                    if not link:
-                        continue
+                # Dodanie grupy do bazy danych
+                grupa_id = insert_grupa(kod_grupy, tryb_studiow, semestr, kierunek_id, link_planu)
 
-                    # Pobieramy kod grupy i opis z tekstu linku
-                    full_text = link.text.strip()
-
-                    # Przykładowy format: "11AW-SP Architektura wnętrz / stacjonarne / pierwszego stopnia z tyt. licencjata"
-                    parts = full_text.split(" ", 1)
-                    kod_grupy = parts[0] if len(parts) > 0 else ""
-                    info_text = parts[1] if len(parts) > 1 else ""
-
-                    # Wyodrębnij tryb studiów
-                    tryb_studiow = "stacjonarne" if "stacjonarne" in info_text.lower() else "niestacjonarne"
-
-                    # Wyciągnij semestr - można to dopasować do danych
-                    semestr = ""  # Tutaj możesz dodać kod do wyciągania semestru, jeśli jest dostępny
-
-                    # Link do planu
-                    link_planu = link['href'] if link else None
-
-                    if kod_grupy and link_planu:
-                        grupa_data = {
-                            'kod_grupy': kod_grupy,
-                            'kierunek_id': kierunek['id'],
-                            'link_planu': link_planu,
-                            'tryb_studiow': tryb_studiow,
-                            'semestr': semestr
-                        }
-
-                        grupa_id = self.db.upsert_grupa(grupa_data)
-                        if grupa_id:
-                            self.total_updated += 1
-                            logger.info(f"Dodano/zaktualizowano grupę: {kod_grupy}")
+                if grupa_id:
+                    # Dodaj grupę do listy
+                    all_grupy.append({
+                        'id': grupa_id,
+                        'kod_grupy': kod_grupy,
+                        'tryb_studiow': tryb_studiow,
+                        'semestr': semestr,
+                        'kierunek_id': kierunek_id,
+                        'link_planu': link_planu
+                    })
+                    print_progress(j, total_grupy, f"Dodano grupę: {kod_grupy}, semestr: {semestr or 'nieznany'}")
+                else:
+                    print_progress(j, total_grupy, f"Nie udało się dodać grupy: {kod_grupy}")
 
             except Exception as e:
-                logger.error(
-                    f"Błąd podczas scrapowania grup dla kierunku {kierunek['nazwa_kierunku']}: {str(e)}")
+                print(f"Błąd podczas przetwarzania grupy: {e}")
+                print_progress(j, total_grupy, f"Błąd przetwarzania")
 
-        logger.info(f"Zakończono scrapowanie grup. Zaktualizowano {self.total_updated} grup")
-        return self.total_updated
+    print(f"\nZakończono scrapowanie grup. Pobrano {len(all_grupy)} grup.")
+    return all_grupy

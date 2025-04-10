@@ -1,128 +1,114 @@
-import requests
-from bs4 import BeautifulSoup
-import logging
+# Moduł do scrapowania danych o nauczycielach
 import re
-from urllib.parse import urlparse, parse_qs
+import time
+from utils import get_soup, clean_text, normalize_url, BASE_URL, print_progress
+from db import insert_nauczyciel
 
-logger = logging.getLogger('UZ_Scraper.Nauczyciele')
+def extract_email(text):
+    """Wyciąga adres email z tekstu"""
+    if not text:
+        return None
 
+    # Prosty regex do wyciągania adresów email
+    match = re.search(r'[\w\.-]+@[\w\.-]+', text)
+    return match.group(0) if match else None
 
-class NauczycieleScraper:
-    def __init__(self, db, base_url):
-        self.db = db
-        self.base_url = base_url
-        self.total_updated = 0
-        self.visited_nauczyciele = set()
+def scrape_nauczyciele():
+    """Scrapuje listę nauczycieli z indeksu alfabetycznego"""
+    print("\nRozpoczynam scrapowanie nauczycieli...")
 
-    def scrape_and_save(self):
-        """Scrapuje i zapisuje nauczycieli do bazy danych."""
-        logger.info("Rozpoczęto scrapowanie nauczycieli")
+    # URL strony z indeksem nauczycieli
+    url = BASE_URL + "nauczyciele_lista.php"
 
-        # Pobieramy nauczycieli z planów grup
-        grupy = self.db.get_grupy()
-        logger.info(f"Znaleziono {len(grupy)} grup do przetworzenia")
+    # Pobierz stronę główną z listą nauczycieli
+    soup = get_soup(url)
+    if not soup:
+        print("Nie udało się pobrać listy nauczycieli")
+        return []
 
-        try:
-            for grupa in grupy:
-                link_planu = grupa.get('link_planu')
-                if not link_planu:
+    # Lista na wszystkich nauczycieli
+    all_nauczyciele = []
+
+    # Znajdź wszystkie linki alfabetyczne (A-Z)
+    alphabet_links = []
+    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        alphabet_links.append(f"{url}?letter={letter}")
+
+    total_links = len(alphabet_links)
+
+    for i, link in enumerate(alphabet_links, 1):
+        letter = link.split('=')[-1]
+        print(f"\n[{i}/{total_links}] Scrapowanie nauczycieli - litera: {letter}")
+
+        # Pobierz stronę z nauczycielami dla danej litery
+        soup = get_soup(link)
+        if not soup:
+            print(f"Nie udało się pobrać listy nauczycieli dla litery {letter}")
+            continue
+
+        # Znajdź wszystkie wiersze w tabeli (odd i even)
+        rows = soup.find_all('tr', class_=['odd', 'even'])
+        total_rows = len(rows)
+
+        if not rows:
+            print(f"Nie znaleziono nauczycieli dla litery {letter}")
+            continue
+
+        for j, row in enumerate(rows, 1):
+            try:
+                # Znajdujemy wszystkie komórki w wierszu
+                cells = row.find_all('td')
+
+                # Sprawdzamy czy wiersz ma odpowiednią liczbę komórek
+                if len(cells) < 3:
+                    print_progress(j, total_rows, f"Nieprawidłowa liczba komórek w wierszu {j}")
                     continue
 
-                # Wyciągnij ID grupy z URL
-                parsed_url = urlparse(link_planu)
-                query_params = parse_qs(parsed_url.query)
-                grupa_id_url = query_params.get('ID', [''])[0]
+                # Pobieramy dane nauczyciela
+                name_cell = cells[0]
+                instytut_cell = cells[1]
+                email_cell = cells[2]
 
-                if not grupa_id_url:
+                # Znajdź link do planu nauczyciela
+                link = name_cell.find('a')
+                if not link:
+                    print_progress(j, total_rows, f"Brak linku dla nauczyciela w wierszu {j}")
                     continue
 
-                grupa_plan_url = f"{self.base_url}/grupy_plan.php?ID={grupa_id_url}"
-                try:
-                    response = requests.get(grupa_plan_url)
-                    if response.status_code != 200:
-                        logger.error(f"Błąd HTTP {response.status_code} dla URL: {grupa_plan_url}")
-                        continue
+                imie_nazwisko = clean_text(link.get_text())
+                link_href = link.get('href')
 
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    # Znajdź linki do planów nauczycieli
-                    nauczyciel_links = soup.find_all('a', href=re.compile(
-                        r'nauczyciel_plan\.php\?ID=\d+'))
+                if not link_href:
+                    print_progress(j, total_rows, f"Brak href dla linku nauczyciela: {imie_nazwisko}")
+                    continue
 
-                    for link in nauczyciel_links:
-                        nauczyciel_url = link['href']
-                        nauczyciel_name = link.text.strip()
+                instytut = clean_text(instytut_cell.get_text()) if instytut_cell else None
+                email = extract_email(clean_text(email_cell.get_text())) if email_cell else None
 
-                        # Wyciągnij ID nauczyciela z URL
-                        parsed_url = urlparse(nauczyciel_url)
-                        query_params = parse_qs(parsed_url.query)
-                        nauczyciel_id_url = query_params.get('ID', [''])[0]
+                link_planu = normalize_url(link_href)
 
-                        if not nauczyciel_id_url or nauczyciel_id_url in self.visited_nauczyciele:
-                            continue
+                # Dodanie nauczyciela do bazy danych
+                nauczyciel_id = insert_nauczyciel(imie_nazwisko, instytut, email, link_planu)
 
-                        self.visited_nauczyciele.add(nauczyciel_id_url)
-
-                        # Pobierz szczegóły nauczyciela
-                        self.scrape_and_save_nauczyciel(nauczyciel_id_url, nauczyciel_name)
-
-                except Exception as e:
-                    logger.error(
-                        f"Błąd podczas przetwarzania planu grupy {grupa.get('kod_grupy')}: {str(e)}")
-
-            logger.info(
-                f"Zakończono scrapowanie nauczycieli. Zaktualizowano {self.total_updated} nauczycieli")
-            return self.total_updated
-
-        except Exception as e:
-            logger.error(f"Błąd podczas scrapowania nauczycieli: {str(e)}")
-            return 0
-
-    def scrape_and_save_nauczyciel(self, nauczyciel_id_url, nauczyciel_name=None):
-        """Scrapuje szczegóły nauczyciela na podstawie ID."""
-        try:
-            nauczyciel_url = f"{self.base_url}/nauczyciel_plan.php?ID={nauczyciel_id_url}"
-            response = requests.get(nauczyciel_url)
-
-            if response.status_code != 200:
-                logger.error(f"Błąd HTTP {response.status_code} dla URL: {nauczyciel_url}")
-                return None
-
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # Pobierz imię i nazwisko z drugiego nagłówka H2, jeśli nie zostało podane
-            if not nauczyciel_name:
-                h2_elements = soup.find_all('h2')
-                if len(h2_elements) > 1:  # Bierzemy drugi element H2
-                    nauczyciel_name = h2_elements[1].text.strip()
-
-            # Pobierz informacje o instytucie z H3
-            instytut_element = soup.find('h3')
-            instytut = instytut_element.text.strip() if instytut_element else ""
-
-            # Pobierz email z H4
-            email_element = soup.find('h4')
-            email = ""
-            if email_element:
-                mail_link = email_element.find('a', href=re.compile(r'mailto:'))
-                if mail_link:
-                    email = mail_link['href'].replace('mailto:', '')
-
-            if nauczyciel_name and instytut:
-                nauczyciel_data = {
-                    'imie_nazwisko': nauczyciel_name,
-                    'instytut': instytut,
-                    'email': email,
-                    'link_planu': nauczyciel_url
-                }
-
-                nauczyciel_id = self.db.upsert_nauczyciel(nauczyciel_data)
                 if nauczyciel_id:
-                    self.total_updated += 1
-                    return nauczyciel_id
+                    # Dodaj nauczyciela do listy
+                    all_nauczyciele.append({
+                        'id': nauczyciel_id,
+                        'imie_nazwisko': imie_nazwisko,
+                        'instytut': instytut,
+                        'email': email,
+                        'link_planu': link_planu
+                    })
+                    print_progress(j, total_rows, f"Dodano nauczyciela: {imie_nazwisko}")
+                else:
+                    print_progress(j, total_rows, f"Nie udało się dodać nauczyciela: {imie_nazwisko}")
 
-            return None
+            except Exception as e:
+                print(f"Błąd podczas przetwarzania nauczyciela: {e}")
+                print_progress(j, total_rows, "Błąd przetwarzania")
 
-        except Exception as e:
-            logger.error(
-                f"Błąd podczas scrapowania szczegółów nauczyciela {nauczyciel_id_url}: {str(e)}")
-            return None
+        # Odczekaj chwilę przed następną literą, żeby nie przeciążyć serwera
+        time.sleep(1)
+
+    print(f"\nZakończono scrapowanie nauczycieli. Pobrano {len(all_nauczyciele)} nauczycieli.")
+    return all_nauczyciele

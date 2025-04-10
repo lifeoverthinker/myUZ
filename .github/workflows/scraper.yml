@@ -2,7 +2,7 @@ name: Run UZ Scraper
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Uruchamiaj co 6 godzin
+    - cron: '0 3 * * *'
   workflow_dispatch:  # Możliwość ręcznego uruchomienia
 
 jobs:

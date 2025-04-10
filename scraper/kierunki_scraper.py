@@ -1,77 +1,66 @@
-import requests
-from bs4 import BeautifulSoup
-import logging
-import re
+# Moduł do pobierania danych o kierunkach studiów
+from utils import get_soup, clean_text, normalize_url, BASE_URL, print_progress
+from db import insert_kierunek
 
-logger = logging.getLogger('UZ_Scraper.Kierunki')
+def scrape_kierunki():
+    """Scrapuje listę kierunków studiów z hierarchią wydziałów."""
+    print("Rozpoczynam scrapowanie kierunków studiów...")
+    url = BASE_URL + "grupy_lista_kierunkow.php"
 
+    soup = get_soup(url)
+    if not soup:
+        print("Nie udało się pobrać listy kierunków")
+        return []
 
-class KierunkiScraper:
-    def __init__(self, db, base_url):
-        self.db = db
-        self.base_url = base_url
-        self.total_updated = 0
+    kierunki = []
 
-    def scrape_and_save(self):
-        """Scrapuje i zapisuje kierunki studiów do bazy danych."""
-        logger.info("Rozpoczęto scrapowanie kierunków studiów")
+    # Znajdujemy wszystkie linki do kierunków
+    all_links = soup.find_all('a', href=lambda href: href and 'grupy_lista_grup_kierunku.php?ID=' in href)
+
+    print(f"Znaleziono {len(all_links)} linków do kierunków")
+    total_links = len(all_links)
+
+    for i, link in enumerate(all_links, 1):
         try:
-            url = f"{self.base_url}/grupy_lista_kierunkow.php"
-            logger.info(f"Pobieranie danych z URL: {url}")
+            nazwa_kierunku = clean_text(link.get_text())
+            link_href = link.get('href')
 
-            response = requests.get(url)
-            if response.status_code != 200:
-                logger.error(f"Błąd HTTP {response.status_code} podczas pobierania listy kierunków")
-                return 0
+            if not link_href:
+                print_progress(i, total_links, f"Brak href dla kierunku: {nazwa_kierunku}")
+                continue
 
-            soup = BeautifulSoup(response.text, 'html.parser')
+            link_grupy = normalize_url(link_href)
 
-            # Znajdź główną listę
-            main_list = soup.find('ul', class_='list-group')
-            if not main_list:
-                logger.error("Nie znaleziono głównej listy grup")
-                return 0
+            # Próba określenia wydziału
+            wydzial_element = link.find_parent('ul', class_='list-group')
+            if wydzial_element and wydzial_element.find_parent('li', class_='list-group-item'):
+                parent_li = wydzial_element.find_parent('li', class_='list-group-item')
+                # Wyciągamy tekst z rodzica, ale usuwamy tekst z linków kierunków
+                wydzial_text = clean_text(parent_li.get_text())
+                for a_tag in parent_li.find_all('a'):
+                    a_text = clean_text(a_tag.get_text())
+                    wydzial_text = wydzial_text.replace(a_text, '')
+                wydzial_text = clean_text(wydzial_text)
+            else:
+                wydzial_text = "Nieznany Wydział"
 
-            # Znajdź elementy li dla wydziałów
-            wydzialy_items = main_list.find_all('li', class_='list-group-item', recursive=False)
+            # Dodaj kierunek do bazy danych
+            kierunek_id = insert_kierunek(nazwa_kierunku, wydzial_text, link_grupy)
 
-            logger.info(f"Znaleziono {len(wydzialy_items)} wydziałów")
+            if kierunek_id:
+                kierunki.append({
+                    'id': kierunek_id,
+                    'nazwa': nazwa_kierunku,
+                    'wydzial': wydzial_text,
+                    'link_grupy': link_grupy
+                })
+                print_progress(i, total_links, f"Dodano kierunek: {nazwa_kierunku} ({wydzial_text})")
+            else:
+                print_progress(i, total_links, f"Nie udało się dodać kierunku: {nazwa_kierunku}")
 
-            for wydzial_item in wydzialy_items:
-                # Pobierz nazwę wydziału (tekst przed zagnieżdżoną listą)
-                wydzial_text = wydzial_item.get_text().strip().split('\n')[0]
-                wydzial_name = wydzial_text.strip()
-
-                # Znajdź zagnieżdżoną listę kierunków
-                kierunki_list = wydzial_item.find('ul', class_='list-group')
-                if not kierunki_list:
-                    continue
-
-                # Znajdź kierunki w zagnieżdżonej liście
-                kierunki_items = kierunki_list.find_all('li', class_='list-group-item')
-                logger.info(
-                    f"Znaleziono {len(kierunki_items)} kierunków dla wydziału {wydzial_name}")
-
-                for kierunek_item in kierunki_items:
-                    link_element = kierunek_item.find('a')
-                    if link_element:
-                        nazwa_kierunku = link_element.text.strip()
-                        link_grupy = link_element['href']
-
-                        kierunek_data = {
-                            'nazwa_kierunku': nazwa_kierunku,
-                            'wydzial': wydzial_name,
-                            'link_grupy': link_grupy
-                        }
-
-                        kierunek_id = self.db.upsert_kierunek(kierunek_data)
-                        if kierunek_id:
-                            self.total_updated += 1
-                            logger.info(f"Dodano/zaktualizowano kierunek: {nazwa_kierunku}")
-
-            logger.info(
-                f"Zakończono scrapowanie kierunków. Zaktualizowano {self.total_updated} kierunków")
-            return self.total_updated
         except Exception as e:
-            logger.error(f"Błąd podczas scrapowania kierunków: {str(e)}")
-            return 0
+            print(f"Błąd podczas przetwarzania kierunku: {e}")
+            print_progress(i, total_links, "Błąd przetwarzania kierunku")
+
+    print(f"\nZakończono scrapowanie kierunków studiów. Pobrano {len(kierunki)} kierunków.")
+    return kierunki
