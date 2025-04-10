@@ -18,7 +18,7 @@ on:
       scrape_type:
         description: 'Co scrapować'
         required: true
-        default: 'all'
+        default: 'aktualizacja-przedmiotow'
         type: choice
         options:
           - all
@@ -120,11 +120,14 @@ jobs:
           print("Inicjalizacja połączenia z bazą danych...")
           try:
               Database.initialize()
+              # Upewnij się, że _client został utworzony
+              if not Database._client:
+                  raise ValueError("Nie udało się utworzyć połączenia z bazą danych")
           except Exception as e:
               print(f"Błąd podczas inicjalizacji bazy danych: {e}")
               sys.exit(1)
           
-          # Dodajmy funkcję do aktualizacji przedmiotów i RZ
+          # Funkcja do ekstrahowania przedmiotu i RZ z nazwy zajęć
           def extract_subject_and_rz(summary):
               if not summary:
                   return None, None
@@ -142,12 +145,13 @@ jobs:
           # Opcja aktualizacji przedmiotów
           if SCRAPE_TYPE == "aktualizacja-przedmiotow":
               print("\n=== Aktualizacja danych przedmiotów i RZ ===")
-              # Bezpośrednio wykonujemy aktualizację
           
               print("Pobieranie zajęć z bazy...")
-              supabase = Database.client
-          
               try:
+                  # Używamy poprawnego atrybutu _client
+                  supabase = Database._client
+          
+                  # Pobieramy wszystkie zajęcia
                   query = supabase.table('zajecia').select('*')
                   if MAX_ITEMS > 0:
                       query = query.limit(MAX_ITEMS)
@@ -163,6 +167,7 @@ jobs:
           
                   updated_count = 0
                   updated_with_rz = 0
+                  skipped_count = 0
           
                   for zajecie in tqdm(all_zajecia, desc="Aktualizacja przedmiotów i RZ"):
                       try:
@@ -170,6 +175,7 @@ jobs:
                           nazwa = zajecie.get('nazwa')
           
                           if not nazwa:
+                              skipped_count += 1
                               continue
           
                           # Ekstrahujemy przedmiot i RZ z nazwy
@@ -190,13 +196,14 @@ jobs:
           
                   print(f"\nZaktualizowano {updated_count} zajęć.")
                   print(f"Z tego {updated_with_rz} zajęć ma wypełnione pole RZ.")
+                  print(f"Pominięto {skipped_count} zajęć (brak nazwy).")
           
               except Exception as e:
                   print(f"Błąd podczas aktualizacji danych: {e}")
                   sys.exit(1)
           
               print("\n=== Zakończono aktualizację ===")
-              sys.exit(0)
+              sys.exit(0)  # Kończymy działanie skryptu
           
           # Standardowe opcje scrapowania
           if SCRAPE_TYPE == "all" or SCRAPE_TYPE == "kierunki":
