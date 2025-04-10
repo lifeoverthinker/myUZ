@@ -1,114 +1,90 @@
-# Moduł do scrapowania danych o nauczycielach
 import re
-import time
-from utils import get_soup, clean_text, normalize_url, BASE_URL, print_progress
-from db import insert_nauczyciel
-
-def extract_email(text):
-    """Wyciąga adres email z tekstu"""
-    if not text:
-        return None
-
-    # Prosty regex do wyciągania adresów email
-    match = re.search(r'[\w\.-]+@[\w\.-]+', text)
-    return match.group(0) if match else None
+from tqdm import tqdm
+from .utils import get_soup, clean_text, normalize_url, print_progress
+from .db import get_all_grupy, insert_nauczyciel
 
 def scrape_nauczyciele():
-    """Scrapuje listę nauczycieli z indeksu alfabetycznego"""
-    print("\nRozpoczynam scrapowanie nauczycieli...")
+    """
+    Zbiera informacje o nauczycielach z planów grup zamiast nieistniejącej centralnej listy
+    """
+    print("\n=== Scrapowanie nauczycieli ===")
+    print("Rozpoczynam zbieranie informacji o nauczycielach z planów grup...")
 
-    # URL strony z indeksem nauczycieli
-    url = BASE_URL + "nauczyciele_lista.php"
-
-    # Pobierz stronę główną z listą nauczycieli
-    soup = get_soup(url)
-    if not soup:
-        print("Nie udało się pobrać listy nauczycieli")
+    # Pobierz grupy z bazy danych
+    grupy = get_all_grupy()
+    if not grupy:
+        print("Nie znaleziono żadnych grup w bazie danych")
         return []
 
-    # Lista na wszystkich nauczycieli
-    all_nauczyciele = []
+    nauczyciele_dict = {}  # Używamy słownika, aby uniknąć duplikatów
 
-    # Znajdź wszystkie linki alfabetyczne (A-Z)
-    alphabet_links = []
-    for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-        alphabet_links.append(f"{url}?letter={letter}")
+    for grupa in tqdm(grupy, desc="Zbieranie nauczycieli z planów grup"):
+        try:
+            # Pobierz link do planu grupy
+            link_planu = grupa['link_planu'] if isinstance(grupa, dict) else grupa.link_planu
 
-    total_links = len(alphabet_links)
+            # Pobierz stronę z planem
+            soup = get_soup(link_planu)
+            if not soup:
+                continue
 
-    for i, link in enumerate(alphabet_links, 1):
-        letter = link.split('=')[-1]
-        print(f"\n[{i}/{total_links}] Scrapowanie nauczycieli - litera: {letter}")
+            # Znajdź wszystkie linki do nauczycieli na stronie
+            teacher_links = soup.find_all('a', href=lambda href: href and 'nauczyciel_plan.php?ID=' in href)
 
-        # Pobierz stronę z nauczycielami dla danej litery
-        soup = get_soup(link)
-        if not soup:
-            print(f"Nie udało się pobrać listy nauczycieli dla litery {letter}")
-            continue
+            for link in teacher_links:
+                try:
+                    # Wyciągnij dane nauczyciela
+                    name = clean_text(link.get_text())
+                    href = link.get('href')
 
-        # Znajdź wszystkie wiersze w tabeli (odd i even)
-        rows = soup.find_all('tr', class_=['odd', 'even'])
-        total_rows = len(rows)
+                    # Wyciągnij ID nauczyciela z URL
+                    id_match = re.search(r'ID=(\d+)', href)
+                    if not id_match:
+                        continue
 
-        if not rows:
-            print(f"Nie znaleziono nauczycieli dla litery {letter}")
-            continue
+                    teacher_id = id_match.group(1)
+                    full_url = normalize_url(href)
 
-        for j, row in enumerate(rows, 1):
-            try:
-                # Znajdujemy wszystkie komórki w wierszu
-                cells = row.find_all('td')
+                    # Jeśli już mamy tego nauczyciela, pomijamy
+                    if teacher_id in nauczyciele_dict:
+                        continue
 
-                # Sprawdzamy czy wiersz ma odpowiednią liczbę komórek
-                if len(cells) < 3:
-                    print_progress(j, total_rows, f"Nieprawidłowa liczba komórek w wierszu {j}")
-                    continue
+                    # Dodaj nauczyciela do słownika
+                    nauczyciele_dict[teacher_id] = {
+                        'id': teacher_id,
+                        'imie_nazwisko': name,
+                        'link_planu': full_url,
+                        'instytut': None,
+                        'email': None
+                    }
 
-                # Pobieramy dane nauczyciela
-                name_cell = cells[0]
-                instytut_cell = cells[1]
-                email_cell = cells[2]
+                    # Opcjonalnie: pobierz dodatkowe informacje z profilu nauczyciela
+                    teacher_soup = get_soup(full_url)
+                    if teacher_soup:
+                        # Próba pobrania instytutu
+                        h3 = teacher_soup.find('h3')
+                        if h3:
+                            nauczyciele_dict[teacher_id]['instytut'] = clean_text(h3.get_text())
 
-                # Znajdź link do planu nauczyciela
-                link = name_cell.find('a')
-                if not link:
-                    print_progress(j, total_rows, f"Brak linku dla nauczyciela w wierszu {j}")
-                    continue
+                        # Próba pobrania emaila
+                        email_link = teacher_soup.find('a', href=lambda href: href and 'mailto:' in href)
+                        if email_link:
+                            nauczyciele_dict[teacher_id]['email'] = clean_text(email_link.get_text())
 
-                imie_nazwisko = clean_text(link.get_text())
-                link_href = link.get('href')
+                    # Zapisz nauczyciela w bazie danych
+                    insert_nauczyciel(
+                        nauczyciele_dict[teacher_id]['imie_nazwisko'],
+                        nauczyciele_dict[teacher_id]['instytut'],
+                        nauczyciele_dict[teacher_id]['email'],
+                        nauczyciele_dict[teacher_id]['link_planu']
+                    )
 
-                if not link_href:
-                    print_progress(j, total_rows, f"Brak href dla linku nauczyciela: {imie_nazwisko}")
-                    continue
+                except Exception as e:
+                    print(f"Błąd przy przetwarzaniu nauczyciela: {e}")
 
-                instytut = clean_text(instytut_cell.get_text()) if instytut_cell else None
-                email = extract_email(clean_text(email_cell.get_text())) if email_cell else None
+        except Exception as e:
+            print(f"Błąd przy przetwarzaniu grupy: {e}")
 
-                link_planu = normalize_url(link_href)
-
-                # Dodanie nauczyciela do bazy danych
-                nauczyciel_id = insert_nauczyciel(imie_nazwisko, instytut, email, link_planu)
-
-                if nauczyciel_id:
-                    # Dodaj nauczyciela do listy
-                    all_nauczyciele.append({
-                        'id': nauczyciel_id,
-                        'imie_nazwisko': imie_nazwisko,
-                        'instytut': instytut,
-                        'email': email,
-                        'link_planu': link_planu
-                    })
-                    print_progress(j, total_rows, f"Dodano nauczyciela: {imie_nazwisko}")
-                else:
-                    print_progress(j, total_rows, f"Nie udało się dodać nauczyciela: {imie_nazwisko}")
-
-            except Exception as e:
-                print(f"Błąd podczas przetwarzania nauczyciela: {e}")
-                print_progress(j, total_rows, "Błąd przetwarzania")
-
-        # Odczekaj chwilę przed następną literą, żeby nie przeciążyć serwera
-        time.sleep(1)
-
-    print(f"\nZakończono scrapowanie nauczycieli. Pobrano {len(all_nauczyciele)} nauczycieli.")
-    return all_nauczyciele
+    nauczyciele_lista = list(nauczyciele_dict.values())
+    print(f"Zakończono zbieranie informacji o nauczycielach. Znaleziono {len(nauczyciele_lista)} nauczycieli.")
+    return nauczyciele_lista
