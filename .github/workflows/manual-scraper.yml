@@ -76,12 +76,6 @@ jobs:
               time.sleep(SLEEP_TIME)
           EOF
 
-      # Dodajemy sprawdzenie struktury db.py przed uruchomieniem
-      - name: Check DB structure
-        run: |
-          echo "Sprawdzam strukturę pliku db.py..."
-          grep -A 10 "initialize" scraper/db.py || echo "Nie znaleziono metody initialize w db.py"
-
       - name: Create run_scraper.py
         run: |
           cat > run_scraper.py << 'EOF'
@@ -117,7 +111,102 @@ jobs:
               print(f"Błąd podczas inicjalizacji bazy danych: {e}")
               sys.exit(1)
           
-          # [RESZTA KODU POZOSTAJE BEZ ZMIAN]
+          # Uruchom wybrany typ scrapowania
+          if scrape_type == "all" or scrape_type == "kierunki":
+              from scraper.kierunki_scraper import scrape_kierunki
+              print("\n=== Scrapowanie kierunków ===")
+              kierunki = scrape_kierunki()
+              if MAX_ITEMS > 0:
+                  kierunki = get_limited_items(kierunki, MAX_ITEMS)
+          
+          if scrape_type == "all" or scrape_type == "grupy":
+              from scraper.grupy_scraper import scrape_grupy
+              print("\n=== Scrapowanie grup ===")
+              if "kierunki" in locals():
+                  grupy = scrape_grupy(kierunki)
+              else:
+                  grupy = scrape_grupy()
+              if MAX_ITEMS > 0:
+                  grupy = get_limited_items(grupy, MAX_ITEMS)
+          
+          if scrape_type == "all" or scrape_type == "nauczyciele":
+              from scraper.db import get_all_grupy
+              import re
+          
+              print("\n=== Scrapowanie nauczycieli z planów grup ===")
+              from scraper.utils import get_soup, clean_text, normalize_url
+              from scraper.db import insert_nauczyciel
+          
+              grupy_lista = get_all_grupy()
+              if MAX_ITEMS > 0:
+                  grupy_lista = get_limited_items(grupy_lista, MAX_ITEMS)
+          
+              nauczyciele_dict = {}
+          
+              for grupa in grupy_lista:
+                  try:
+                      link_planu = grupa['link_planu'] if isinstance(grupa, dict) else grupa.link_planu
+                      soup = get_soup(link_planu)
+                      if not soup:
+                          continue
+          
+                      teacher_links = soup.find_all('a', href=lambda href: href and 'nauczyciel_plan.php?ID=' in href)
+          
+                      for teacher_link in teacher_links:
+                          try:
+                              teacher_name = clean_text(teacher_link.get_text())
+                              teacher_href = teacher_link.get('href')
+          
+                              if not teacher_href:
+                                  continue
+          
+                              teacher_id_match = re.search(r'ID=(\d+)', teacher_href)
+                              if not teacher_id_match:
+                                  continue
+          
+                              teacher_id = teacher_id_match.group(1)
+                              if teacher_id in nauczyciele_dict:
+                                  continue
+          
+                              teacher_link_full = normalize_url(teacher_href)
+                              nauczyciele_dict[teacher_id] = {
+                                  'id': teacher_id,
+                                  'imie_nazwisko': teacher_name,
+                                  'link_planu': teacher_link_full
+                              }
+          
+                              insert_nauczyciel(teacher_name, None, None, teacher_link_full)
+                              print(f"Dodano nauczyciela: {teacher_name}")
+                          except Exception as e:
+                              print(f"Błąd podczas przetwarzania nauczyciela: {e}")
+                  except Exception as e:
+                      print(f"Błąd podczas przetwarzania grupy: {e}")
+          
+              print(f"Zakończono scrapowanie nauczycieli. Znaleziono {len(nauczyciele_dict)} nauczycieli.")
+          
+          if scrape_type == "all" or scrape_type == "plany-grup":
+              from scraper.plany_scraper import scrape_plany_grup
+              from scraper.db import get_all_grupy
+          
+              print("\n=== Scrapowanie planów grup ===")
+              grupy_lista = get_all_grupy()
+              if MAX_ITEMS > 0:
+                  grupy_lista = get_limited_items(grupy_lista, MAX_ITEMS)
+          
+              scrape_plany_grup(grupy_lista=grupy_lista, collect_teachers=COLLECT_TEACHERS)
+          
+          if scrape_type == "all" or scrape_type == "plany-nauczycieli":
+              from scraper.plany_scraper import scrape_plany_nauczycieli
+              from scraper.db import get_all_nauczyciele
+          
+              print("\n=== Scrapowanie planów nauczycieli ===")
+              nauczyciele_lista = get_all_nauczyciele()
+              if MAX_ITEMS > 0:
+                  nauczyciele_lista = get_limited_items(nauczyciele_lista, MAX_ITEMS)
+          
+              scrape_plany_nauczycieli(nauczyciele_lista=nauczyciele_lista)
+          
+          print("\n=== Zakończono scrapowanie ===")
           EOF
 
       - name: Run scraper
