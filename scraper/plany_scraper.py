@@ -276,7 +276,7 @@ def scrape_plany_nauczycieli(nauczyciele_lista=None):
 
             processed += 1
             # Odczekaj chwilę między żądaniami, żeby nie przeciążyć serwera
-            time.sleep(0.5)
+            time.sleep(0.1)
 
         except Exception as e:
             print(f"Błąd podczas przetwarzania planu nauczyciela: {e}")
