@@ -91,7 +91,7 @@ jobs:
           import sys
           import time
           from tqdm import tqdm
-          from scraper.db import Database, get_all_zajecia
+          from scraper.db import Database
           from scraper.scraper_config import MAX_ITEMS, SLEEP_TIME, get_limited_items, custom_sleep
           
           # Patch dla time.sleep
@@ -118,6 +118,22 @@ jobs:
               # Jeśli nie znaleźliśmy dopasowania, zwracamy oryginalny tekst i None
               return summary, None
           
+          def get_all_zajecia_from_db(supabase, limit=None):
+              """
+              Pobiera wszystkie zajęcia z bazy danych.
+              Zastępuje funkcję get_all_zajecia, której nie ma w module db.py.
+              """
+              try:
+                  query = supabase.table('zajecia').select('*')
+                  if limit and limit > 0:
+                      query = query.limit(limit)
+          
+                  response = query.execute()
+                  return response.data
+              except Exception as e:
+                  print(f"Błąd podczas pobierania zajęć: {e}")
+                  return []
+          
           def update_subjects_and_rz():
               """
               Aktualizuje dane przedmiotów i RZ dla istniejących zajęć w bazie.
@@ -130,17 +146,14 @@ jobs:
                   sys.exit(1)
           
               print("Pobieranie wszystkich zajęć z bazy...")
-              all_zajecia = get_all_zajecia()
+              supabase = Database.client
+              all_zajecia = get_all_zajecia_from_db(supabase, MAX_ITEMS if MAX_ITEMS > 0 else None)
           
               if not all_zajecia:
                   print("Nie znaleziono zajęć w bazie danych!")
                   return
           
               print(f"Znaleziono {len(all_zajecia)} zajęć.")
-          
-              if MAX_ITEMS > 0:
-                  all_zajecia = get_limited_items(all_zajecia, MAX_ITEMS)
-                  print(f"Ograniczono do {len(all_zajecia)} zajęć.")
           
               updated_count = 0
               updated_with_rz = 0
@@ -159,7 +172,6 @@ jobs:
                       przedmiot, rz = extract_subject_and_rz(nazwa)
           
                       # Aktualizujemy dane w bazie
-                      supabase = Database.client
                       result = supabase.table('zajecia').update({
                           'przedmiot': przedmiot,
                           'rz': rz
