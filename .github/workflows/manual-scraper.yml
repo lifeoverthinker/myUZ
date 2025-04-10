@@ -9,12 +9,12 @@ on:
         default: 'plany-grup'
         type: choice
         options:
-        - all
-        - kierunki
-        - grupy
-        - plany-grup
-        - plany-nauczycieli
-        - nauczyciele
+          - all
+          - kierunki
+          - grupy
+          - plany-grup
+          - plany-nauczycieli
+          - nauczyciele
       max_items:
         description: 'Maksymalna liczba elementów (0 = wszystkie)'
         required: false
@@ -37,186 +37,186 @@ jobs:
     timeout-minutes: 720  # 12 godzin maksymalnie
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-        cache: 'pip'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r scraper/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Create scraper_config.py
-      run: |
-        cat > scraper/scraper_config.py << 'EOF'
-        # Dynamicznie generowany plik konfiguracyjny
-        import os
+      - name: Create scraper_config.py
+        run: |
+          cat > scraper/scraper_config.py << 'EOF'
+          # Dynamicznie generowany plik konfiguracyjny
+          import os
+          
+          # Parametry pobrane z GitHub Actions
+          MAX_ITEMS = ${{ inputs.max_items }}
+          SLEEP_TIME = ${{ inputs.sleep_time }}
+          COLLECT_TEACHERS = ${{ inputs.collect_teachers == 'true' && 'True' || 'False' }}
+          
+          # Funkcje pomocnicze
+          def get_limited_items(items_list, max_items=MAX_ITEMS):
+              """Zwraca ograniczoną liczbę elementów (0 = wszystkie)"""
+              if max_items <= 0:
+                  return items_list
+              return items_list[:max_items]
+          
+          # Zastępuje domyślne time.sleep
+          def custom_sleep():
+              """Używa niestandardowego czasu uśpienia"""
+              import time
+              time.sleep(SLEEP_TIME)
+          EOF
 
-        # Parametry pobrane z GitHub Actions
-        MAX_ITEMS = ${{ inputs.max_items }}
-        SLEEP_TIME = ${{ inputs.sleep_time }}
-        COLLECT_TEACHERS = ${{ inputs.collect_teachers == 'true' }}
+      - name: Create run_scraper.py
+        run: |
+          cat > run_scraper.py << 'EOF'
+          # Skrypt uruchamiający wybraną część scrapera
+          import sys
+          import time
+          import os
+          from scraper.db import Database
+          from scraper.scraper_config import MAX_ITEMS, SLEEP_TIME, COLLECT_TEACHERS, get_limited_items, custom_sleep
+          
+          # Patch dla time.sleep w utils.py
+          import scraper.utils
+          original_sleep = time.sleep
+          time.sleep = lambda x: custom_sleep()
+          
+          # Zależnie od wybranego typu, importujemy odpowiedni moduł
+          scrape_type = "${{ inputs.scrape_type }}"
+          
+          print(f"Uruchamianie scrapera: {scrape_type}")
+          print(f"Konfiguracja: MAX_ITEMS={MAX_ITEMS}, SLEEP_TIME={SLEEP_TIME}, COLLECT_TEACHERS={COLLECT_TEACHERS}")
+          
+          # Inicjalizacja bazy danych
+          print("Inicjalizacja połączenia z bazą danych...")
+          try:
+              Database.initialize()
+          except Exception as e:
+              print(f"Błąd podczas inicjalizacji bazy danych: {e}")
+              sys.exit(1)
+          
+          # Uruchom wybrany typ scrapowania
+          if scrape_type == "all" or scrape_type == "kierunki":
+              from scraper.kierunki_scraper import scrape_kierunki
+              print("\n=== Scrapowanie kierunków ===")
+              kierunki = scrape_kierunki()
+              if MAX_ITEMS > 0:
+                  kierunki = get_limited_items(kierunki, MAX_ITEMS)
+          
+          if scrape_type == "all" or scrape_type == "grupy":
+              from scraper.grupy_scraper import scrape_grupy
+              print("\n=== Scrapowanie grup ===")
+              if "kierunki" in locals():
+                  grupy = scrape_grupy(kierunki)
+              else:
+                  grupy = scrape_grupy()
+              if MAX_ITEMS > 0:
+                  grupy = get_limited_items(grupy, MAX_ITEMS)
+          
+          if scrape_type == "all" or scrape_type == "nauczyciele":
+              from scraper.db import get_all_grupy
+              from scraper.plany_scraper import extract_teacher_from_description
+              import re
+          
+              print("\n=== Scrapowanie nauczycieli z planów grup ===")
+              from scraper.utils import get_soup, clean_text, normalize_url
+              from scraper.db import insert_nauczyciel
+          
+              grupy_lista = get_all_grupy()
+              if MAX_ITEMS > 0:
+                  grupy_lista = get_limited_items(grupy_lista, MAX_ITEMS)
+          
+              nauczyciele_dict = {}
+          
+              for grupa in grupy_lista:
+                  try:
+                      link_planu = grupa['link_planu'] if isinstance(grupa, dict) else grupa.link_planu
+                      soup = get_soup(link_planu)
+                      if not soup:
+                          continue
+          
+                      teacher_links = soup.find_all('a', href=lambda href: href and 'nauczyciel_plan.php?ID=' in href)
+          
+                      for teacher_link in teacher_links:
+                          try:
+                              teacher_name = clean_text(teacher_link.get_text())
+                              teacher_href = teacher_link.get('href')
+          
+                              if not teacher_href:
+                                  continue
+          
+                              teacher_id_match = re.search(r'ID=(\d+)', teacher_href)
+                              if not teacher_id_match:
+                                  continue
+          
+                              teacher_id = teacher_id_match.group(1)
+                              if teacher_id in nauczyciele_dict:
+                                  continue
+          
+                              teacher_link_full = normalize_url(teacher_href)
+                              nauczyciele_dict[teacher_id] = {
+                                  'id': teacher_id,
+                                  'imie_nazwisko': teacher_name,
+                                  'link_planu': teacher_link_full
+                              }
+          
+                              insert_nauczyciel(teacher_name, None, None, teacher_link_full)
+                              print(f"Dodano nauczyciela: {teacher_name}")
+                          except Exception as e:
+                              print(f"Błąd podczas przetwarzania nauczyciela: {e}")
+                  except Exception as e:
+                      print(f"Błąd podczas przetwarzania grupy: {e}")
+          
+              print(f"Zakończono scrapowanie nauczycieli. Znaleziono {len(nauczyciele_dict)} nauczycieli.")
+          
+          if scrape_type == "all" or scrape_type == "plany-grup":
+              from scraper.plany_scraper import scrape_plany_grup
+              from scraper.db import get_all_grupy
+          
+              print("\n=== Scrapowanie planów grup ===")
+              grupy_lista = get_all_grupy()
+              if MAX_ITEMS > 0:
+                  grupy_lista = get_limited_items(grupy_lista, MAX_ITEMS)
+          
+              scrape_plany_grup(grupy_lista=grupy_lista, collect_teachers=COLLECT_TEACHERS)
+          
+          if scrape_type == "all" or scrape_type == "plany-nauczycieli":
+              from scraper.plany_scraper import scrape_plany_nauczycieli
+              from scraper.db import get_all_nauczyciele
+          
+              print("\n=== Scrapowanie planów nauczycieli ===")
+              nauczyciele_lista = get_all_nauczyciele()
+              if MAX_ITEMS > 0:
+                  nauczyciele_lista = get_limited_items(nauczyciele_lista, MAX_ITEMS)
+          
+              scrape_plany_nauczycieli(nauczyciele_lista=nauczyciele_lista)
+          
+          print("\n=== Zakończono scrapowanie ===")
+          EOF
 
-        # Funkcje pomocnicze
-        def get_limited_items(items_list, max_items=MAX_ITEMS):
-            """Zwraca ograniczoną liczbę elementów (0 = wszystkie)"""
-            if max_items <= 0:
-                return items_list
-            return items_list[:max_items]
+      - name: Run scraper
+        run: python run_scraper.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
 
-        # Zastępuje domyślne time.sleep
-        def custom_sleep():
-            """Używa niestandardowego czasu uśpienia"""
-            import time
-            time.sleep(SLEEP_TIME)
-        EOF
-
-    - name: Create run_scraper.py
-      run: |
-        cat > run_scraper.py << 'EOF'
-        # Skrypt uruchamiający wybraną część scrapera
-        import sys
-        import time
-        import os
-        from scraper.db import Database
-        from scraper.scraper_config import MAX_ITEMS, SLEEP_TIME, COLLECT_TEACHERS, get_limited_items, custom_sleep
-
-        # Patch dla time.sleep w utils.py
-        import scraper.utils
-        original_sleep = time.sleep
-        time.sleep = lambda x: custom_sleep()
-
-        # Zależnie od wybranego typu, importujemy odpowiedni moduł
-        scrape_type = "${{ inputs.scrape_type }}"
-        
-        print(f"Uruchamianie scrapera: {scrape_type}")
-        print(f"Konfiguracja: MAX_ITEMS={MAX_ITEMS}, SLEEP_TIME={SLEEP_TIME}, COLLECT_TEACHERS={COLLECT_TEACHERS}")
-
-        # Inicjalizacja bazy danych
-        print("Inicjalizacja połączenia z bazą danych...")
-        try:
-            Database.initialize()
-        except Exception as e:
-            print(f"Błąd podczas inicjalizacji bazy danych: {e}")
-            sys.exit(1)
-
-        # Uruchom wybrany typ scrapowania
-        if scrape_type == "all" or scrape_type == "kierunki":
-            from scraper.kierunki_scraper import scrape_kierunki
-            print("\n=== Scrapowanie kierunków ===")
-            kierunki = scrape_kierunki()
-            if MAX_ITEMS > 0:
-                kierunki = get_limited_items(kierunki, MAX_ITEMS)
-        
-        if scrape_type == "all" or scrape_type == "grupy":
-            from scraper.grupy_scraper import scrape_grupy
-            print("\n=== Scrapowanie grup ===")
-            if "kierunki" in locals():
-                grupy = scrape_grupy(kierunki)
-            else:
-                grupy = scrape_grupy()
-            if MAX_ITEMS > 0:
-                grupy = get_limited_items(grupy, MAX_ITEMS)
-        
-        if scrape_type == "all" or scrape_type == "nauczyciele":
-            from scraper.db import get_all_grupy
-            from scraper.plany_scraper import extract_teacher_from_description
-            import re
-            
-            print("\n=== Scrapowanie nauczycieli z planów grup ===")
-            from scraper.utils import get_soup, clean_text, normalize_url
-            from scraper.db import insert_nauczyciel
-            
-            grupy_lista = get_all_grupy()
-            if MAX_ITEMS > 0:
-                grupy_lista = get_limited_items(grupy_lista, MAX_ITEMS)
-                
-            nauczyciele_dict = {}
-            
-            for grupa in grupy_lista:
-                try:
-                    link_planu = grupa['link_planu'] if isinstance(grupa, dict) else grupa.link_planu
-                    soup = get_soup(link_planu)
-                    if not soup:
-                        continue
-                    
-                    teacher_links = soup.find_all('a', href=lambda href: href and 'nauczyciel_plan.php?ID=' in href)
-                    
-                    for teacher_link in teacher_links:
-                        try:
-                            teacher_name = clean_text(teacher_link.get_text())
-                            teacher_href = teacher_link.get('href')
-                            
-                            if not teacher_href:
-                                continue
-                            
-                            teacher_id_match = re.search(r'ID=(\d+)', teacher_href)
-                            if not teacher_id_match:
-                                continue
-                            
-                            teacher_id = teacher_id_match.group(1)
-                            if teacher_id in nauczyciele_dict:
-                                continue
-                                
-                            teacher_link_full = normalize_url(teacher_href)
-                            nauczyciele_dict[teacher_id] = {
-                                'id': teacher_id,
-                                'imie_nazwisko': teacher_name,
-                                'link_planu': teacher_link_full
-                            }
-                            
-                            insert_nauczyciel(teacher_name, None, None, teacher_link_full)
-                            print(f"Dodano nauczyciela: {teacher_name}")
-                        except Exception as e:
-                            print(f"Błąd podczas przetwarzania nauczyciela: {e}")
-                except Exception as e:
-                    print(f"Błąd podczas przetwarzania grupy: {e}")
-            
-            print(f"Zakończono scrapowanie nauczycieli. Znaleziono {len(nauczyciele_dict)} nauczycieli.")
-            
-        if scrape_type == "all" or scrape_type == "plany-grup":
-            from scraper.plany_scraper import scrape_plany_grup
-            from scraper.db import get_all_grupy
-            
-            print("\n=== Scrapowanie planów grup ===")
-            grupy_lista = get_all_grupy()
-            if MAX_ITEMS > 0:
-                grupy_lista = get_limited_items(grupy_lista, MAX_ITEMS)
-                
-            scrape_plany_grup(grupy_lista=grupy_lista, collect_teachers=COLLECT_TEACHERS)
-            
-        if scrape_type == "all" or scrape_type == "plany-nauczycieli":
-            from scraper.plany_scraper import scrape_plany_nauczycieli
-            from scraper.db import get_all_nauczyciele
-            
-            print("\n=== Scrapowanie planów nauczycieli ===")
-            nauczyciele_lista = get_all_nauczyciele()
-            if MAX_ITEMS > 0:
-                nauczyciele_lista = get_limited_items(nauczyciele_lista, MAX_ITEMS)
-                
-            scrape_plany_nauczycieli(nauczyciele_lista=nauczyciele_lista)
-
-        print("\n=== Zakończono scrapowanie ===")
-        EOF
-
-    - name: Run scraper
-      run: python run_scraper.py
-      env:
-        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-        SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-
-    - name: Create summary
-      run: |
-        echo "# Podsumowanie scrapowania" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "- Typ scrapowania: ${{ inputs.scrape_type }}" >> $GITHUB_STEP_SUMMARY
-        echo "- Maksymalna liczba elementów: ${{ inputs.max_items }} (0 = wszystkie)" >> $GITHUB_STEP_SUMMARY
-        echo "- Opóźnienie między żądaniami: ${{ inputs.sleep_time }}s" >> $GITHUB_STEP_SUMMARY
-        echo "- Zbieranie informacji o nauczycielach: ${{ inputs.collect_teachers }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "Sprawdź logi powyżej, aby zobaczyć szczegółowe informacje o przebiegu scrapowania." >> $GITHUB_STEP_SUMMARY
+      - name: Create summary
+        run: |
+          echo "# Podsumowanie scrapowania" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Typ scrapowania: ${{ inputs.scrape_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Maksymalna liczba elementów: ${{ inputs.max_items }} (0 = wszystkie)" >> $GITHUB_STEP_SUMMARY
+          echo "- Opóźnienie między żądaniami: ${{ inputs.sleep_time }}s" >> $GITHUB_STEP_SUMMARY
+          echo "- Zbieranie informacji o nauczycielach: ${{ inputs.collect_teachers }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Sprawdź logi powyżej, aby zobaczyć szczegółowe informacje o przebiegu scrapowania." >> $GITHUB_STEP_SUMMARY
