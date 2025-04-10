@@ -116,47 +116,52 @@ def scrape_plany_grup(grupy_lista=None, collect_teachers=True):
             for event in events:
                 try:
                     # Wyciągnij dane z wydarzenia
-                    przedmiot = event.get('summary', '')
+                    raw_summary = event.get('summary', '')
+
+                    # Wyciągnij czystą nazwę przedmiotu i rodzaj zajęć z tytułu
+                    przedmiot, rz = extract_subject_and_rz(raw_summary)
+                    if not przedmiot:
+                        przedmiot = raw_summary
+
                     od = event.get('dtstart', None)
                     do = event.get('dtend', None)
                     lokalizacja = event.get('location', '')
                     opis = event.get('description', '')
 
-                    # Pobierz bezpośrednio rodzaj zajęć z wydarzenia ICS
-                    rz = event.get('rz')
+                    # Jeśli nie znaleźliśmy RZ z tytułu, spróbuj z CATEGORIES lub opisu
+                    if not rz and 'categories' in event:
+                        rz = event.get('categories')
 
-                    # Jeśli nie ma, próba wyciągnięcia z opisu (fallback)
                     if not rz:
                         rz_match = re.search(r'\bRZ:\s*([A-Za-zĆ]+)', opis)
                         if rz_match:
                             rz = rz_match.group(1)
-                        else:
-                            # Spróbuj wyciągnąć z kategorii lub podsumowania
-                            if 'categories' in event:
-                                rz = event['categories']
-                            else:
-                                # Szukanie RZ w podsumowaniu (np. "Przedmiot (W): Wykładowca")
-                                rz_match = re.search(r'\(([WĆLSEP])\)', przedmiot)
-                                if rz_match:
-                                    rz = rz_match.group(1)
 
                     # Dodaj zajęcia do bazy danych
                     zajecia_id = insert_zajecia(przedmiot, od, do, lokalizacja, rz, ics_link)
 
                     # Powiąż zajęcia z grupą
                     if zajecia_id:
-                        insert_grupa_zajecia(grupa_id, zajecia_id)
+                        link_zajecia_grupa(zajecia_id, grupa_id)
 
-                        # Jeśli collect_teachers, spróbuj znaleźć nauczyciela w opisie
+                        # Jeśli collect_teachers, spróbuj znaleźć nauczyciela w opisie lub tytule
                         if collect_teachers:
-                            teacher_name = extract_teacher_from_description(przedmiot)
+                            # Szukanie prowadzącego w formacie "Przedmiot: Prowadzący"
+                            teacher_name = None
+                            teacher_match = re.search(r':\s+(.+?)$', raw_summary)
+                            if teacher_match:
+                                teacher_name = teacher_match.group(1).strip()
+
+                            # Alternatywnie, szukaj w opisie
                             if not teacher_name:
-                                teacher_name = extract_teacher_from_description(opis)
+                                teacher_match = re.search(r'Prowadzący:\s+(.+?)(\n|$)', opis)
+                                if teacher_match:
+                                    teacher_name = teacher_match.group(1).strip()
 
                             if teacher_name:
                                 teacher_id = insert_nauczyciel(teacher_name, None, None, None)
                                 if teacher_id:
-                                    insert_nauczyciel_zajecia(teacher_id, zajecia_id)
+                                    link_zajecia_nauczyciel(zajecia_id, teacher_id)
                 except Exception as e:
                     print(f"Błąd podczas przetwarzania wydarzenia dla grupy {kod_grupy}: {e}")
                     continue
@@ -172,6 +177,26 @@ def scrape_plany_grup(grupy_lista=None, collect_teachers=True):
     print(f"\nZakończono scrapowanie planów zajęć grup. Przetworzono {processed}/{total_grupy} grup.")
     if collect_teachers:
         print(f"Znaleziono {len(teachers_found)} unikalnych nauczycieli podczas scrapowania planów.")
+
+def extract_subject_and_rz(summary):
+    """
+    Wyciąga czystą nazwę przedmiotu i rodzaj zajęć z tytułu wydarzenia.
+    Wyciąga dowolny tekst z nawiasów jako rodzaj zajęć.
+    """
+    if not summary:
+        return None, None
+
+    # Wzorzec: Nazwa przedmiotu (RZ): Prowadzący
+    # lub: Nazwa przedmiotu (RZ)
+    # Wyciąga dowolny tekst z nawiasów jako RZ
+    match = re.search(r'^(.+?)\s*\(([^)]+)\).*$', summary)
+    if match:
+        subject_name = match.group(1).strip()
+        rz = match.group(2).strip()
+        return subject_name, rz
+
+    # Jeśli nie znaleźliśmy dopasowania, zwracamy oryginalny tekst i None
+    return summary, None
 
 def scrape_plany_nauczycieli(nauczyciele_lista=None):
     """Scrapuje plany zajęć dla nauczycieli"""

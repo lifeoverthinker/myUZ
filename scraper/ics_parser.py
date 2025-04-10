@@ -5,16 +5,25 @@ from dateutil import tz
 from datetime import datetime
 import re
 
-def extract_rz_from_summary(summary):
-    """Wyciąga rodzaj zajęć z podsumowania wydarzenia"""
+def extract_subject_and_rz(summary):
+    """
+    Wyciąga czystą nazwę przedmiotu i rodzaj zajęć z tytułu wydarzenia.
+    Wyciąga dowolny tekst z nawiasów jako rodzaj zajęć.
+    """
     if not summary:
-        return None
+        return None, None
 
-    # Szukanie wzorca: "Nazwa przedmiotu (RZ):"
-    rz_match = re.search(r'\(([WĆLSEP])\)', summary)
-    if rz_match:
-        return rz_match.group(1)
-    return None
+    # Wzorzec: Nazwa przedmiotu (RZ): Prowadzący
+    # lub: Nazwa przedmiotu (RZ)
+    # Wyciąga dowolny tekst z nawiasów jako RZ
+    match = re.search(r'^(.+?)\s*\(([^)]+)\).*$', summary)
+    if match:
+        subject_name = match.group(1).strip()
+        rz = match.group(2).strip()
+        return subject_name, rz
+
+    # Jeśli nie znaleźliśmy dopasowania, zwracamy oryginalny tekst i None
+    return summary, None
 
 def parse_ics_file(url):
     """Parsuje plik ICS z podanego URL i zwraca listę wydarzeń (zajęć)"""
@@ -34,7 +43,11 @@ def parse_ics_file(url):
 
                 # Podstawowe informacje
                 if 'SUMMARY' in component:
-                    event['summary'] = str(component['SUMMARY'])
+                    raw_summary = str(component['SUMMARY'])
+                    subject_name, rz_from_summary = extract_subject_and_rz(raw_summary)
+                    event['summary'] = raw_summary  # Zachowujemy pełną informację
+                    event['subject'] = subject_name  # Czysta nazwa przedmiotu
+                    event['rz'] = rz_from_summary  # Rodzaj zajęć z nawiasów
 
                 if 'LOCATION' in component:
                     event['location'] = str(component['LOCATION'])
@@ -45,33 +58,24 @@ def parse_ics_file(url):
                 # Daty początku i końca
                 if 'DTSTART' in component:
                     dtstart = component['DTSTART'].dt
-                    # Konwersja do datetime, jeśli to data
                     if not isinstance(dtstart, datetime):
                         dtstart = datetime.combine(dtstart, datetime.min.time())
-                    # Konwersja do UTC jeśli ma strefę czasową
                     if dtstart.tzinfo:
                         dtstart = dtstart.astimezone(tz.UTC)
                     event['dtstart'] = dtstart
 
                 if 'DTEND' in component:
                     dtend = component['DTEND'].dt
-                    # Konwersja do datetime, jeśli to data
                     if not isinstance(dtend, datetime):
                         dtend = datetime.combine(dtend, datetime.min.time())
-                    # Konwersja do UTC jeśli ma strefę czasową
                     if dtend.tzinfo:
                         dtend = dtend.astimezone(tz.UTC)
                     event['dtend'] = dtend
 
-                # Rodzaj zajęć - najbardziej wiarygodne źródło to CATEGORIES
-                if 'CATEGORIES' in component:
-                    event['rz'] = str(component['CATEGORIES'])
-                    # Czyszczenie kategorii (pozbycie się niewidocznych znaków)
-                    event['rz'] = re.sub(r'[^\w\s]', '', event['rz']).strip()
-                else:
-                    # Próba wyciągnięcia RZ z tytułu
-                    summary = event.get('summary', '')
-                    event['rz'] = extract_rz_from_summary(summary)
+                # Rodzaj zajęć - jeśli nie znaleziono w tytule, spróbuj z CATEGORIES
+                if 'rz' not in event or not event['rz']:
+                    if 'CATEGORIES' in component:
+                        event['rz'] = str(component['CATEGORIES']).strip()
 
                 events.append(event)
 
