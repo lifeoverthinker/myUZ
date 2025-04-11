@@ -148,7 +148,6 @@ jobs:
           
               print("Pobieranie zajęć z bazy...")
               try:
-                  # Używamy poprawnego atrybutu _client
                   supabase = Database._client
           
                   # Pobieramy wszystkie zajęcia
@@ -172,31 +171,35 @@ jobs:
                   for zajecie in tqdm(all_zajecia, desc="Aktualizacja przedmiotów i RZ"):
                       try:
                           zajecie_id = zajecie.get('id')
-                          nazwa = zajecie.get('nazwa')
+                          # Używamy 'przedmiot' zamiast 'nazwa'
+                          pelna_nazwa = zajecie.get('przedmiot')
           
-                          if not nazwa:
+                          if not pelna_nazwa:
                               skipped_count += 1
                               continue
           
-                          # Ekstrahujemy przedmiot i RZ z nazwy
-                          przedmiot, rz = extract_subject_and_rz(nazwa)
+                          # Ekstrahujemy przedmiot i RZ z pełnej nazwy
+                          przedmiot, rz = extract_subject_and_rz(pelna_nazwa)
           
-                          # Aktualizujemy dane w bazie
+                          # Jeśli nie udało się wyekstrahować RZ, nie aktualizujemy
+                          if not rz:
+                              skipped_count += 1
+                              continue
+          
+                          # Aktualizujemy dane w bazie - tylko pole RZ
                           result = supabase.table('zajecia').update({
-                              'przedmiot': przedmiot,
                               'rz': rz
                           }).eq('id', zajecie_id).execute()
           
                           updated_count += 1
-                          if rz:
-                              updated_with_rz += 1
+                          updated_with_rz += 1
           
                       except Exception as e:
                           print(f"Błąd podczas aktualizacji zajęcia (ID: {zajecie.get('id')}): {e}")
           
                   print(f"\nZaktualizowano {updated_count} zajęć.")
                   print(f"Z tego {updated_with_rz} zajęć ma wypełnione pole RZ.")
-                  print(f"Pominięto {skipped_count} zajęć (brak nazwy).")
+                  print(f"Pominięto {skipped_count} zajęć (brak nazwy lub nie znaleziono RZ).")
           
               except Exception as e:
                   print(f"Błąd podczas aktualizacji danych: {e}")
