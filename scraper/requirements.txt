@@ -1,0 +1,6 @@
+# Lista bibliotek Pythona
+
+requests
+icalendar
+python-dotenv
+supabase

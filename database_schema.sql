@@ -3,7 +3,7 @@ CREATE TABLE public.grupy (
   semestr character varying(255) NULL,
   tryb_studiow character varying(50) NULL,
   kierunek_id uuid NULL,
-  link_planu character varying(255) NULL,
+  link_grupy character varying(255) NULL,
   kod_grupy character varying(50) NULL,
   CONSTRAINT grupy_pkey PRIMARY KEY (id),
   CONSTRAINT grupy_kierunek_id_fkey FOREIGN KEY (kierunek_id) REFERENCES kierunki(id)
@@ -14,7 +14,7 @@ CREATE TABLE public.kierunki (
   id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
   nazwa_kierunku character varying(255) NULL,
   wydzial character varying(255) NULL,
-  link_grupy character varying(255) NULL,
+  link_kierunku character varying(255) NULL,
   CONSTRAINT kierunki_pkey PRIMARY KEY (id)
 );
 
@@ -35,9 +35,10 @@ CREATE TABLE public.plany_grup (
   nauczyciel_id uuid NULL,
   od timestamp without time zone NULL,
   do_ timestamp without time zone NULL,
-  przedmiot character varying(255) NULL,
+  przedmiot text NULL,
   rz character varying(10) NULL,
   miejsce character varying(255) NULL,
+  podgrupa character varying(20) NULL,
   CONSTRAINT plany_grup_pkey PRIMARY KEY (id),
   CONSTRAINT plany_grup_grupa_id_fkey FOREIGN KEY (grupa_id) REFERENCES grupy(id),
   CONSTRAINT plany_grup_nauczyciel_id_fkey FOREIGN KEY (nauczyciel_id) REFERENCES nauczyciele(id)
@@ -50,7 +51,7 @@ CREATE TABLE public.plany_nauczycieli (
   link_ics character varying(255) NULL,
   od timestamp without time zone NULL,
   do_ timestamp without time zone NULL,
-  przedmiot character varying(255) NULL,
+  przedmiot text NULL,
   rz character varying(10) NULL,
   grupy character varying(255) NULL,
   miejsce character varying(255) NULL,
@@ -60,7 +61,7 @@ CREATE TABLE public.plany_nauczycieli (
 
 CREATE TABLE public.zajecia (
   id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
-  przedmiot character varying(255) NULL,
+  przedmiot text NULL,
   od timestamp without time zone NULL,
   do_ timestamp without time zone NULL,
   miejsce character varying(255) NULL,
@@ -68,6 +69,7 @@ CREATE TABLE public.zajecia (
   link_ics character varying(255) NULL,
   data_utworzenia timestamp without time zone NULL DEFAULT CURRENT_TIMESTAMP,
   data_aktualizacji timestamp without time zone NULL DEFAULT CURRENT_TIMESTAMP,
+  podgrupa character varying(20) NULL,
   CONSTRAINT zajecia_pkey PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_zajecia_czas ON public.zajecia USING btree (od, do_);
@@ -93,3 +95,171 @@ CREATE TABLE public.zajecia_nauczyciele (
   CONSTRAINT zajecia_nauczyciele_zajecia_id_fkey FOREIGN KEY (zajecia_id) REFERENCES zajecia(id)
 );
 CREATE INDEX IF NOT EXISTS idx_zajecia_nauczyciele_nauczyciel ON public.zajecia_nauczyciele USING btree (nauczyciel_id);
+
+CREATE POLICY "Allow select for authenticated users" ON public.grupy
+FOR SELECT
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow insert for authenticated users" ON public.grupy
+FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+CREATE POLICY "Allow update for authenticated users" ON public.grupy
+FOR UPDATE
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+CREATE POLICY "Allow delete for authenticated users" ON public.grupy
+FOR DELETE
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow select for authenticated users" ON public.kierunki
+FOR SELECT
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow insert for authenticated users" ON public.kierunki
+FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+CREATE POLICY "Allow update for authenticated users" ON public.kierunki
+FOR UPDATE
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+CREATE POLICY "Allow delete for authenticated users" ON public.kierunki
+FOR DELETE
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow select for authenticated users" ON public.nauczyciele
+FOR SELECT
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow insert for authenticated users" ON public.nauczyciele
+FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+CREATE POLICY "Allow update for authenticated users" ON public.nauczyciele
+FOR UPDATE
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+CREATE POLICY "Allow delete for authenticated users" ON public.nauczyciele
+FOR DELETE
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow select for authenticated users" ON public.plany_grup
+FOR SELECT
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow insert for authenticated users" ON public.plany_grup
+FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+CREATE POLICY "Allow update for authenticated users" ON public.plany_grup
+FOR UPDATE
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+CREATE POLICY "Allow delete for authenticated users" ON public.plany_grup
+FOR DELETE
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow select for authenticated users" ON public.plany_nauczycieli
+FOR SELECT
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow insert for authenticated users" ON public.plany_nauczycieli
+FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+CREATE POLICY "Allow update for authenticated users" ON public.plany_nauczycieli
+FOR UPDATE
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+CREATE POLICY "Allow delete for authenticated users" ON public.plany_nauczycieli
+FOR DELETE
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow select for authenticated users" ON public.zajecia
+FOR SELECT
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow insert for authenticated users" ON public.zajecia
+FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+CREATE POLICY "Allow update for authenticated users" ON public.zajecia
+FOR UPDATE
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+CREATE POLICY "Allow delete for authenticated users" ON public.zajecia
+FOR DELETE
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow select for authenticated users" ON public.zajecia_grupy
+FOR SELECT
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow insert for authenticated users" ON public.zajecia_grupy
+FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+CREATE POLICY "Allow update for authenticated users" ON public.zajecia_grupy
+FOR UPDATE
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+CREATE POLICY "Allow delete for authenticated users" ON public.zajecia_grupy
+FOR DELETE
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow select for authenticated users" ON public.zajecia_nauczyciele
+FOR SELECT
+TO authenticated
+USING (true);
+
+CREATE POLICY "Allow insert for authenticated users" ON public.zajecia_nauczyciele
+FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+CREATE POLICY "Allow update for authenticated users" ON public.zajecia_nauczyciele
+FOR UPDATE
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+CREATE POLICY "Allow delete for authenticated users" ON public.zajecia_nauczyciele
+FOR DELETE
+TO authenticated
+USING (true);
