@@ -334,16 +334,14 @@ def update_grupy(kierunki, upsert=True):
                 to_update.append({
                     'id': grupa['id'],
                     'kod_grupy': grupa['kod_grupy'],
-                    'kierunek_id': grupa['kierunek_id'],
-                    'nazwa_grupy': grupa.get('nazwa_grupy', '')
+                    'kierunek_id': grupa['kierunek_id']
                 })
             else:
                 # Do dodania
                 to_insert.append({
                     'kod_grupy': grupa['kod_grupy'],
                     'kierunek_id': grupa['kierunek_id'],
-                    'link_ics_grupy': link_ics,
-                    'nazwa_grupy': grupa.get('nazwa_grupy', '')
+                    'link_ics_grupy': link_ics
                 })
 
         # Wykonaj wsadowe operacje
