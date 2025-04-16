@@ -20,7 +20,7 @@ jobs:
       - name: Instalacja zależności
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r scraper/requirements.txt
 
       - name: Uruchom scraper
         env:
