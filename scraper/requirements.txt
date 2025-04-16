@@ -1,6 +1,7 @@
 # Lista bibliotek Pythona
 
 requests
-icalendar
+beautifulsoup4
 python-dotenv
 supabase
+icalendar

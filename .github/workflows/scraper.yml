@@ -1,8 +1,6 @@
 name: UZ Plan Scraper
 
 on:
-  schedule:
-    - cron: '0 4 * * *'  # Uruchamia codziennie o 4:00 rano UTC
   workflow_dispatch:  # Umożliwia ręczne uruchomienie
 
 jobs:
