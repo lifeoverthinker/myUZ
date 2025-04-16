@@ -38,7 +38,6 @@ def parse_grupy(html: str, kierunek: str, wydzial: str, kierunek_id: int = None)
     soup = BeautifulSoup(html, "html.parser")
     wynik = []
 
-    # Znajdź wszystkie wiersze tabeli z grupami
     grupy_items = soup.find_all("tr", class_=["odd", "even"])
     if not grupy_items:
         print(f"❌ Nie znaleziono grup dla kierunku: {kierunek}")
@@ -48,8 +47,6 @@ def parse_grupy(html: str, kierunek: str, wydzial: str, kierunek_id: int = None)
         a_tag = item.find("a")
         if a_tag:
             pelna_nazwa = a_tag.get_text(strip=True)
-
-            # Wyodrębnij kod grupy (pierwszą część przed spacją)
             kod_grupy = pelna_nazwa.split()[0]
 
             # Wyodrębnij tryb studiów (część między / /)
@@ -59,33 +56,35 @@ def parse_grupy(html: str, kierunek: str, wydzial: str, kierunek_id: int = None)
                 if len(parts) > 1:
                     tryb_studiow = parts[1].strip()
 
-            # Pobierz link do planu grupy
+            # Określenie semestru na podstawie drugiej cyfry w kodzie grupy
+            # np. 11H-SD24 - druga cyfra to 1, co oznacza semestr zimowy
+            # np. 12H-SD24 - druga cyfra to 2, co oznacza semestr letni
+            semestr = "zimowy"
+            if len(kod_grupy) > 1 and kod_grupy[1].isdigit():
+                if kod_grupy[1] == "2":
+                    semestr = "letni"
+
             link_grupy = BASE_URL + a_tag["href"]
-
-            # ID grupy z URL
             grupa_id = a_tag["href"].split("ID=")[1].split("&")[0] if "ID=" in a_tag["href"] else None
-
-            # Link do planu w formacie ICS
             link_grupy_ics = link_grupy.replace("grupy_plan.php?ID=", "grupy_ics.php?ID=") + "&KIND=GG"
 
             grupa_data = {
                 "kod_grupy": kod_grupy,
-                "tryb": tryb_studiow,
+                "tryb_studiow": tryb_studiow,  # zmieniono z "tryb" na "tryb_studiow"
                 "kierunek": kierunek,
                 "wydzial": wydzial,
-                "link_strona_grupy": link_grupy,
-                "link_ics_grupy": link_grupy_ics
+                "link_grupy": link_grupy,  # zmieniono z "link_strona_grupy" na "link_grupy"
+                "link_ics_grupy": link_grupy_ics,
+                "semestr": semestr  # dodano informację o semestrze
             }
 
-            # Dodaj ID kierunku jeśli istnieje
             if kierunek_id:
                 grupa_data["kierunek_id"] = kierunek_id
 
             wynik.append(grupa_data)
-            print(f"📌 Dodano grupę: {kod_grupy} ({tryb_studiow})")
+            print(f"📌 Dodano grupę: {kod_grupy} ({kierunek})")
 
     return wynik
-
 
 def scrape_grupy_for_kierunki(link_kierunku: str) -> list[dict]:
     """Scrapuje grupy dla podanego linku kierunku."""

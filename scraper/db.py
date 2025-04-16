@@ -215,8 +215,7 @@ def update_nauczyciele(grupy=None):
                 nauczyciel['id'] = existing_map[email]
                 to_update.append({
                     'id': nauczyciel['id'],
-                    'imie': nauczyciel.get('imie', ''),
-                    'nazwisko': nauczyciel.get('nazwisko', ''),
+                    'imie_nazwisko': nauczyciel.get('imie_nazwisko', ''),
                     'tytul': nauczyciel.get('tytul', ''),
                     'instytut': nauczyciel.get('instytut', ''),
                     'link_nauczyciela': nauczyciel.get('link_nauczyciela', ''),
@@ -232,8 +231,7 @@ def update_nauczyciele(grupy=None):
             else:
                 # Do dodania
                 to_insert.append({
-                    'imie': nauczyciel.get('imie', ''),
-                    'nazwisko': nauczyciel.get('nazwisko', ''),
+                    'imie_nazwisko': nauczyciel.get('imie_nazwisko', ''),
                     'tytul': nauczyciel.get('tytul', ''),
                     'email': email,
                     'instytut': nauczyciel.get('instytut', ''),
@@ -334,14 +332,20 @@ def update_grupy(kierunki, upsert=True):
                 to_update.append({
                     'id': grupa['id'],
                     'kod_grupy': grupa['kod_grupy'],
-                    'kierunek_id': grupa['kierunek_id']
+                    'kierunek_id': grupa['kierunek_id'],
+                    'semestr': grupa.get('semestr', ''),
+                    'tryb_studiow': grupa.get('tryb_studiow', ''),
+                    'link_grupy': grupa.get('link_grupy', ''),
                 })
             else:
                 # Do dodania
                 to_insert.append({
                     'kod_grupy': grupa['kod_grupy'],
                     'kierunek_id': grupa['kierunek_id'],
-                    'link_ics_grupy': link_ics
+                    'link_ics_grupy': link_ics,
+                    'semestr': grupa.get('semestr', ''),
+                    'tryb_studiow': grupa.get('tryb_studiow', ''),
+                    'link_grupy': grupa.get('link_grupy', '')
                 })
 
         # Wykonaj wsadowe operacje

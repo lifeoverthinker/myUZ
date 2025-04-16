@@ -101,7 +101,7 @@ from icalendar import Calendar
 import re
 
 
-def parse_ics(content: str) -> list[dict]:
+def parse_ics(content: str, grupa_id=None) -> list[dict]:
     events = []
     cal = Calendar.from_ical(content)
 
@@ -136,7 +136,7 @@ def parse_ics(content: str) -> list[dict]:
             # usuwamy ten fragment z nauczyciela
             nauczyciel = re.sub(r"\(PG:.*?\)", "", nauczyciel).strip() if nauczyciel else None
 
-        events.append({
+        event_data = {
             "przedmiot": przedmiot,
             "rz": rz,
             "nauczyciel": nauczyciel,
@@ -144,6 +144,12 @@ def parse_ics(content: str) -> list[dict]:
             "od": start,
             "do_": end,
             "miejsce": location
-        })
+        }
+
+        # Dodaj grupa_id jeśli podano
+        if grupa_id is not None:
+            event_data["grupa_id"] = grupa_id
+
+        events.append(event_data)
 
     return events
