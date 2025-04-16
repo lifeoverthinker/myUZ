@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 import os
 from supabase import create_client
 from scraper.kierunki_scraper import scrape_kierunki
-from grupy_scraper import scrape_grupy_for_kierunki
-from nauczyciel_parser import scrape_nauczyciele_from_grupy
+from scraper.grupy_scraper import scrape_grupy_for_kierunki
+from scraper.nauczyciel_parser import scrape_nauczyciele_from_grupy
 
 load_dotenv()
 
