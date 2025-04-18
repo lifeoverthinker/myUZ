@@ -175,26 +175,11 @@ def fetch_grupa_semestr(url: str) -> str:
 
     text = h3_tag.text.lower()
 
-    # Bardziej precyzyjny regex do wyciągania semestru i roku akademickiego
-    semester_match = re.search(r'semestr\s+(letni|zimowy)\s+(\d{4}/\d{4})', text)
-    if semester_match:
-        semester_type = semester_match.group(1)  # letni lub zimowy
-        academic_year = semester_match.group(2)  # np. 2024/2025
-        return f"{semester_type} {academic_year}"
-
-    # Jeśli nie znaleziono pełnego wzorca, szukaj oddzielnie
-    semester_type = None
+    # Szukaj tylko słowa "letni" lub "zimowy"
     if "semestr letni" in text:
-        semester_type = "letni"
+        return "letni"
     elif "semestr zimowy" in text:
-        semester_type = "zimowy"
-
-    # Szukaj roku akademickiego w dowolnym miejscu tekstu
-    year_match = re.search(r'(\d{4}/\d{4})', text)
-    academic_year = year_match.group(1) if year_match else ""
-
-    if semester_type:
-        return f"{semester_type} {academic_year}".strip()
+        return "zimowy"
 
     return "nieznany"
 
@@ -218,12 +203,17 @@ def parse_grupy(html: str, kierunek: str, wydzial: str, kierunek_id: int = None)
             kod_grupy_parts = pelna_nazwa.split(' ', 1)
             kod_grupy = kod_grupy_parts[0].strip()
 
-            # Wyodrębnij tryb studiów (część między / /)
+            # Sprawdzamy, czy kod grupy nie jest za długi
+            if len(kod_grupy) > 20:
+                kod_grupy = kod_grupy[:17] + "..."
+                print(f"⚠️ Skrócono kod_grupy: {kod_grupy}")
+
+            # Precyzyjne określenie trybu studiów
             tryb_studiow = "nieznany"
-            if "/" in pelna_nazwa:
-                parts = pelna_nazwa.split("/")
-                if len(parts) > 1:
-                    tryb_studiow = parts[1].strip()
+            if "stacjonarne" in pelna_nazwa.lower():
+                tryb_studiow = "stacjonarne"
+            elif "niestacjonarne" in pelna_nazwa.lower():
+                tryb_studiow = "niestacjonarne"
 
             link_grupy = BASE_URL + a_tag["href"]
             grupa_id = a_tag["href"].split("ID=")[1].split("&")[0] if "ID=" in a_tag["href"] else None

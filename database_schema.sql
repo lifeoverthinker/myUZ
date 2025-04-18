@@ -5,6 +5,7 @@ CREATE TABLE public.grupy (
   kierunek_id uuid NULL,
   link_grupy character varying(255) NULL,
   kod_grupy character varying(50) NULL,
+  link_ics_grupy character varying(255) NULL,
   CONSTRAINT grupy_pkey PRIMARY KEY (id),
   CONSTRAINT grupy_kierunek_id_fkey FOREIGN KEY (kierunek_id) REFERENCES kierunki(id)
 );
@@ -14,7 +15,7 @@ CREATE TABLE public.kierunki (
   id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
   nazwa_kierunku character varying(255) NULL,
   wydzial character varying(255) NULL,
-  link_kierunku character varying(255) NULL,
+  link_strony_kierunku character varying(255) NULL,
   CONSTRAINT kierunki_pkey PRIMARY KEY (id)
 );
 
@@ -23,15 +24,26 @@ CREATE TABLE public.nauczyciele (
   imie_nazwisko character varying(255) NULL,
   instytut character varying(255) NULL,
   email character varying(255) NULL,
-  link_planu character varying(255) NULL,
+  link_plan_nauczyciela character varying(255) NULL,
+  link_strony_nauczyciela character varying(255) NULL,
   CONSTRAINT nauczyciele_pkey PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_nauczyciele_nazwisko ON public.nauczyciele USING btree (imie_nazwisko);
 
+CREATE TABLE public.nauczyciele_grupy (
+  nauczyciel_id uuid NOT NULL,
+  grupa_id uuid NOT NULL,
+  CONSTRAINT nauczyciele_grupy_pkey PRIMARY KEY (nauczyciel_id, grupa_id),
+  CONSTRAINT nauczyciele_grupy_grupa_id_fkey FOREIGN KEY (grupa_id) REFERENCES grupy(id),
+  CONSTRAINT nauczyciele_grupy_nauczyciel_id_fkey FOREIGN KEY (nauczyciel_id) REFERENCES nauczyciele(id)
+);
+CREATE INDEX IF NOT EXISTS idx_nauczyciele_grupy_nauczyciel ON public.nauczyciele_grupy USING btree (nauczyciel_id);
+CREATE INDEX IF NOT EXISTS idx_nauczyciele_grupy_grupa ON public.nauczyciele_grupy USING btree (grupa_id);
+
 CREATE TABLE public.plany_grup (
   id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
   grupa_id uuid NULL,
-  link_ics character varying(255) NULL,
+  link_ics_grupy character varying(255) NULL,
   nauczyciel_id uuid NULL,
   od timestamp without time zone NULL,
   do_ timestamp without time zone NULL,
@@ -48,7 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_plany_grup_nauczyciel ON public.plany_grup USING 
 CREATE TABLE public.plany_nauczycieli (
   id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
   nauczyciel_id uuid NULL,
-  link_ics character varying(255) NULL,
+  link_ics_nauczyciela character varying(255) NULL,
   od timestamp without time zone NULL,
   do_ timestamp without time zone NULL,
   przedmiot text NULL,
@@ -66,12 +78,14 @@ CREATE TABLE public.zajecia (
   do_ timestamp without time zone NULL,
   miejsce character varying(255) NULL,
   rz character varying(10) NULL,
-  link_ics character varying(255) NULL,
+  link_ics_zrodlowy character varying(255) NULL,
   data_utworzenia timestamp without time zone NULL DEFAULT CURRENT_TIMESTAMP,
   data_aktualizacji timestamp without time zone NULL DEFAULT CURRENT_TIMESTAMP,
   podgrupa character varying(20) NULL,
+  uid character varying(255) NULL,
   CONSTRAINT zajecia_pkey PRIMARY KEY (id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_zajecia_uid ON public.zajecia USING btree (uid) WHERE (uid IS NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_zajecia_czas ON public.zajecia USING btree (od, do_);
 CREATE INDEX IF NOT EXISTS idx_zajecia_miejsce ON public.zajecia USING btree (miejsce);
 CREATE INDEX IF NOT EXISTS idx_zajecia_przedmiot ON public.zajecia USING btree (przedmiot);
@@ -96,170 +110,25 @@ CREATE TABLE public.zajecia_nauczyciele (
 );
 CREATE INDEX IF NOT EXISTS idx_zajecia_nauczyciele_nauczyciel ON public.zajecia_nauczyciele USING btree (nauczyciel_id);
 
-CREATE POLICY "Allow select for authenticated users" ON public.grupy
-FOR SELECT
-TO authenticated
-USING (true);
+Allow insert for service role
 
-CREATE POLICY "Allow insert for authenticated users" ON public.grupy
-FOR INSERT
-TO authenticated
-WITH CHECK (true);
+Action: INSERT
+Roles: public
+Definition: null
+Check: (auth.role() = 'service_role'::text)
+Allow select for service role
 
-CREATE POLICY "Allow update for authenticated users" ON public.grupy
-FOR UPDATE
-TO authenticated
-USING (true)
-WITH CHECK (true);
+Action: SELECT
+Roles: public
+Definition: true
+Allow full access for service role
 
-CREATE POLICY "Allow delete for authenticated users" ON public.grupy
-FOR DELETE
-TO authenticated
-USING (true);
+Action: ALL
+Roles: service_role
+Definition: true
+Check: true
+Allow select for anon
 
-CREATE POLICY "Allow select for authenticated users" ON public.kierunki
-FOR SELECT
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow insert for authenticated users" ON public.kierunki
-FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
-CREATE POLICY "Allow update for authenticated users" ON public.kierunki
-FOR UPDATE
-TO authenticated
-USING (true)
-WITH CHECK (true);
-
-CREATE POLICY "Allow delete for authenticated users" ON public.kierunki
-FOR DELETE
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow select for authenticated users" ON public.nauczyciele
-FOR SELECT
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow insert for authenticated users" ON public.nauczyciele
-FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
-CREATE POLICY "Allow update for authenticated users" ON public.nauczyciele
-FOR UPDATE
-TO authenticated
-USING (true)
-WITH CHECK (true);
-
-CREATE POLICY "Allow delete for authenticated users" ON public.nauczyciele
-FOR DELETE
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow select for authenticated users" ON public.plany_grup
-FOR SELECT
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow insert for authenticated users" ON public.plany_grup
-FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
-CREATE POLICY "Allow update for authenticated users" ON public.plany_grup
-FOR UPDATE
-TO authenticated
-USING (true)
-WITH CHECK (true);
-
-CREATE POLICY "Allow delete for authenticated users" ON public.plany_grup
-FOR DELETE
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow select for authenticated users" ON public.plany_nauczycieli
-FOR SELECT
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow insert for authenticated users" ON public.plany_nauczycieli
-FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
-CREATE POLICY "Allow update for authenticated users" ON public.plany_nauczycieli
-FOR UPDATE
-TO authenticated
-USING (true)
-WITH CHECK (true);
-
-CREATE POLICY "Allow delete for authenticated users" ON public.plany_nauczycieli
-FOR DELETE
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow select for authenticated users" ON public.zajecia
-FOR SELECT
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow insert for authenticated users" ON public.zajecia
-FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
-CREATE POLICY "Allow update for authenticated users" ON public.zajecia
-FOR UPDATE
-TO authenticated
-USING (true)
-WITH CHECK (true);
-
-CREATE POLICY "Allow delete for authenticated users" ON public.zajecia
-FOR DELETE
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow select for authenticated users" ON public.zajecia_grupy
-FOR SELECT
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow insert for authenticated users" ON public.zajecia_grupy
-FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
-CREATE POLICY "Allow update for authenticated users" ON public.zajecia_grupy
-FOR UPDATE
-TO authenticated
-USING (true)
-WITH CHECK (true);
-
-CREATE POLICY "Allow delete for authenticated users" ON public.zajecia_grupy
-FOR DELETE
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow select for authenticated users" ON public.zajecia_nauczyciele
-FOR SELECT
-TO authenticated
-USING (true);
-
-CREATE POLICY "Allow insert for authenticated users" ON public.zajecia_nauczyciele
-FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
-CREATE POLICY "Allow update for authenticated users" ON public.zajecia_nauczyciele
-FOR UPDATE
-TO authenticated
-USING (true)
-WITH CHECK (true);
-
-CREATE POLICY "Allow delete for authenticated users" ON public.zajecia_nauczyciele
-FOR DELETE
-TO authenticated
-USING (true);
+Action: SELECT
+Roles: anon
+Definition: true

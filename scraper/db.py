@@ -14,6 +14,45 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
+def _utworz_powiazanie_nauczyciel_grupa(nauczyciel_id, grupa_id):
+    """Tworzy powiązanie nauczyciel-grupa poprzez tabelę nauczyciele_grupy."""
+    try:
+        # Użyj bezpośredniego powiązania przez tabelę nauczyciele_grupy
+        relacja_data = {
+            'nauczyciel_id': nauczyciel_id,
+            'grupa_id': grupa_id
+        }
+
+        supabase.table('nauczyciele_grupy').insert(relacja_data).execute()
+        return True
+    except Exception as e:
+        print(f"⚠️ Nie udało się utworzyć powiązania dla nauczyciela {nauczyciel_id}: {e}")
+        return False
+
+
+def _utworz_powiazania_zajecia(zajecia_data, events):
+    """Tworzy powiązania zajęć z grupami i nauczycielami."""
+    try:
+        for i, zajecie in enumerate(zajecia_data):
+            zajecie_id = zajecie['id']
+            event = events[i]
+
+            # Powiązanie z grupą
+            if 'grupa_id' in event and event['grupa_id']:
+                supabase.table('zajecia_grupy').insert({
+                    'zajecia_id': zajecie_id,
+                    'grupa_id': event['grupa_id']
+                }).execute()
+
+            # Powiązanie z nauczycielem
+            if 'nauczyciel_id' in event and event['nauczyciel_id']:
+                supabase.table('zajecia_nauczyciele').insert({
+                    'zajecia_id': zajecie_id,
+                    'nauczyciel_id': event['nauczyciel_id']
+                }).execute()
+    except Exception as e:
+        print(f"⚠️ Błąd podczas tworzenia powiązań zajęć: {e}")
+
 def save_kierunki(kierunki):
     """Zapisuje kierunki do bazy danych metodą wsadową."""
     if not kierunki:
@@ -23,9 +62,9 @@ def save_kierunki(kierunki):
     batch_data = []
     for kierunek in kierunki:
         batch_data.append({
-            'nazwa': kierunek['nazwa_kierunku'],
-            'wydzial': kierunek['wydzial'],
-            'link': kierunek['link_kierunku']  # Zmieniono nazwę kolumny z 'link_kierunku' na 'link'
+            'nazwa_kierunku': kierunek.get('nazwa_kierunku'),
+            'wydzial': kierunek.get('wydzial'),
+            'link_strony_kierunku': kierunek.get('link_kierunku')  # poprawna nazwa kolumny
         })
 
     try:
@@ -34,17 +73,15 @@ def save_kierunki(kierunki):
 
         # Przypisz ID z powrotem do obiektów kierunków
         if result.data:
-            for i, item in enumerate(result.data):
+            for i, kierunek_db in enumerate(result.data):
                 if i < len(kierunki):
-                    kierunki[i]['id'] = item['id']
+                    kierunki[i]['id'] = kierunek_db['id']
 
         print(f"✅ Dodano wsadowo {len(batch_data)} kierunków")
         return kierunki
     except Exception as e:
         print(f"❌ Błąd podczas zapisywania kierunków: {e}")
         return []
-
-
 
 def save_nauczyciele(nauczyciele):
     """Zapisuje nauczycieli do bazy danych metodą wsadową."""
@@ -56,33 +93,29 @@ def save_nauczyciele(nauczyciele):
         nauczyciele_data = []
         for nauczyciel in nauczyciele:
             nauczyciele_data.append({
-                'imie': nauczyciel.get('imie', ''),
-                'nazwisko': nauczyciel.get('nazwisko', ''),
-                'tytul': nauczyciel.get('tytul', ''),
-                'email': nauczyciel.get('email', ''),
-                'instytut': nauczyciel.get('instytut', ''),
-                'link_nauczyciela': nauczyciel.get('link', ''),
-                'link_ics': nauczyciel.get('link_ics', '')
+                'imie_nazwisko': nauczyciel.get('imie_nazwisko'),
+                'instytut': nauczyciel.get('instytut'),
+                'email': nauczyciel.get('email'),
+                'link_plan_nauczyciela': nauczyciel.get('link_planu'),  # poprawna nazwa kolumny
+                'link_strony_nauczyciela': nauczyciel.get('link_nauczyciela')  # poprawna nazwa kolumny
             })
 
         # Wsadowe dodanie nauczycieli
         if nauczyciele_data:
             result = supabase.table('nauczyciele').insert(nauczyciele_data).execute()
-
-            # Przypisz ID z powrotem
-            if result.data:
-                for i, item in enumerate(result.data):
-                    if i < len(nauczyciele):
-                        nauczyciele[i]['id'] = item['id']
+            for i, n_db in enumerate(result.data):
+                if i < len(nauczyciele):
+                    nauczyciele[i]['id'] = n_db['id']
 
         # Przygotuj relacje nauczyciel-grupa
         relacje = []
         for nauczyciel in nauczyciele:
-            if 'id' in nauczyciel and 'grupa_id' in nauczyciel and nauczyciel['grupa_id']:
-                relacje.append({
-                    'nauczyciel_id': nauczyciel['id'],
-                    'grupa_id': nauczyciel['grupa_id']
-                })
+            if 'id' in nauczyciel and 'grupy_id' in nauczyciel:
+                for grupa_id in nauczyciel['grupy_id']:
+                    relacje.append({
+                        'nauczyciel_id': nauczyciel['id'],
+                        'grupa_id': grupa_id
+                    })
 
         # Wsadowe dodanie relacji
         if relacje:
@@ -94,15 +127,8 @@ def save_nauczyciele(nauczyciele):
         print(f"❌ Błąd podczas zapisywania nauczycieli: {e}")
         return []
 
-
-def save_events(events: list[dict], source_type: str) -> None:
-    """
-    Zapisuje wydarzenia (zajęcia) do bazy danych.
-
-    Args:
-        events: Lista wydarzeń do zapisania
-        source_type: Typ źródła ('grupa' lub 'nauczyciel')
-    """
+def save_events(events: list[dict]) -> None:
+    """Zapisuje wydarzenia (zajęcia) do bazy danych."""
     if not events:
         return
 
@@ -111,28 +137,25 @@ def save_events(events: list[dict], source_type: str) -> None:
         events_data = []
 
         for event in events:
-            data = {
-                'tytul': event.get('summary', ''),
-                'opis': event.get('description', ''),
-                'lokalizacja': event.get('location', ''),
-                'data_start': event.get('start', ''),
-                'data_end': event.get('end', ''),  # Zmieniono z 'data_koniec' na 'data_end'
-                'uid': event.get('uid', ''),
-                'link_ics_zrodlowy': event.get('link_ics', '')
-            }
-
-            # Dodaj klucz obcy w zależności od typu źródła
-            if source_type == 'grupa' and 'grupa_id' in event:
-                data['grupa_id'] = event['grupa_id']
-            elif source_type == 'nauczyciel' and 'nauczyciel_id' in event:
-                data['nauczyciel_id'] = event['nauczyciel_id']
-
-            events_data.append(data)
+            events_data.append({
+                'przedmiot': event.get('przedmiot'),
+                'od': event.get('od'),
+                'do_': event.get('do_'),
+                'miejsce': event.get('miejsce'),
+                'rz': event.get('rz'),
+                'link_ics_zrodlowy': event.get('link_ics'),  # poprawna nazwa kolumny
+                'podgrupa': event.get('pg'),
+                'uid': event.get('uid')
+            })
 
         # Wsadowe dodanie wydarzeń
         if events_data:
             result = supabase.table('zajecia').insert(events_data).execute()
             print(f"✅ Dodano {len(events_data)} wydarzeń")
+
+            # Tworzenie powiązań z grupami i nauczycielami
+            if result.data:
+                _utworz_powiazania_zajecia(result.data, events)
 
     except Exception as e:
         print(f"❌ Błąd podczas zapisywania wydarzeń: {e}")
@@ -156,30 +179,28 @@ def update_kierunki(upsert=True):
             link = kierunek.get('link_kierunku')  # Pole z funkcji scrape_kierunki
 
             if link in existing_map:
-                # Do aktualizacji
                 kierunek['id'] = existing_map[link]
                 to_update.append({
                     'id': kierunek['id'],
-                    'nazwa_kierunku': kierunek['nazwa_kierunku'],  # Poprawna nazwa kolumny
-                    'wydzial': kierunek['wydzial']
+                    'nazwa_kierunku': kierunek.get('nazwa_kierunku'),
+                    'wydzial': kierunek.get('wydzial'),
+                    'link_strony_kierunku': link  # poprawna nazwa kolumny
                 })
             else:
-                # Do dodania
                 to_insert.append({
-                    'nazwa_kierunku': kierunek['nazwa_kierunku'],  # Poprawna nazwa kolumny
-                    'wydzial': kierunek['wydzial'],
-                    'link_strony_kierunku': link
+                    'nazwa_kierunku': kierunek.get('nazwa_kierunku'),
+                    'wydzial': kierunek.get('wydzial'),
+                    'link_strony_kierunku': link  # poprawna nazwa kolumny
                 })
 
         # Wykonaj wsadowe operacje
         if to_insert:
             insert_result = supabase.table('kierunki').insert(to_insert).execute()
             if insert_result.data:
-                insert_idx = 0
-                for kierunek in kierunki_data:
-                    if kierunek.get('id') is None:
-                        kierunek['id'] = insert_result.data[insert_idx]['id']
-                        insert_idx += 1
+                for i, data in enumerate(insert_result.data):
+                    if i < len(kierunki_data):
+                        if 'link_kierunku' in kierunki_data[i] and kierunki_data[i]['link_kierunku'] not in existing_map:
+                            kierunki_data[i]['id'] = data['id']
 
         # Aktualizuj istniejące rekordy
         if to_update:
@@ -206,7 +227,6 @@ def update_nauczyciele(grupy=None):
 
         to_update = []
         to_insert = []
-        relacje = []
 
         for nauczyciel in nauczyciele:
             email = nauczyciel.get('email', '')
@@ -218,22 +238,19 @@ def update_nauczyciele(grupy=None):
                     'imie_nazwisko': nauczyciel.get('imie_nazwisko', ''),
                     'instytut': nauczyciel.get('instytut', ''),
                     'email': email,
-                    'link_planu': nauczyciel.get('link_ics', '')  # Zgodne z definicją tabeli
+                    'link_planu': nauczyciel.get('link_ics', '')
                 })
 
-                # Zapisz relację
+                # Zapisz relację poprzez tabelę zajęcia
                 if 'grupa_id' in nauczyciel and nauczyciel['grupa_id']:
-                    relacje.append({
-                        'nauczyciel_id': nauczyciel['id'],
-                        'grupa_id': nauczyciel['grupa_id']
-                    })
+                    _utworz_powiazanie_nauczyciel_grupa(nauczyciel['id'], nauczyciel['grupa_id'])
             else:
                 # Do dodania
                 to_insert.append({
                     'imie_nazwisko': nauczyciel.get('imie_nazwisko', ''),
                     'instytut': nauczyciel.get('instytut', ''),
                     'email': email,
-                    'link_planu': nauczyciel.get('link_ics', '')  # Zgodne z definicją tabeli
+                    'link_plan_nauczyciela': nauczyciel.get('link_ics', '')
                 })
 
         # Wykonaj wsadowe operacje
@@ -241,32 +258,26 @@ def update_nauczyciele(grupy=None):
             insert_result = supabase.table('nauczyciele').insert(to_insert).execute()
             if insert_result.data:
                 insert_idx = 0
-                for i, nauczyciel in enumerate(nauczyciele):
+                for nauczyciel in nauczyciele:
                     if nauczyciel.get('id') is None:
                         nauczyciel['id'] = insert_result.data[insert_idx]['id']
                         insert_idx += 1
 
-                        # Dodaj relację dla nowo utworzonych nauczycieli
+                        # Analogiczne powiązanie dla nowych nauczycieli
                         if 'grupa_id' in nauczyciel and nauczyciel['grupa_id']:
-                            relacje.append({
-                                'nauczyciel_id': nauczyciel['id'],
-                                'grupa_id': nauczyciel['grupa_id']
-                            })
+                            _utworz_powiazanie_nauczyciel_grupa(nauczyciel['id'], nauczyciel['grupa_id'])
 
         # Aktualizuj istniejących nauczycieli
         if to_update:
             for item in to_update:
                 supabase.table('nauczyciele').update(item).eq('id', item['id']).execute()
 
-        # Zapisz relacje nauczyciel-grupa
-        if relacje:
-            supabase.table('nauczyciele_grupy').insert(relacje).execute()
-
         print(f"✅ Zaktualizowano {len(to_update)} nauczycieli, dodano {len(to_insert)} nowych")
         return nauczyciele
     except Exception as e:
         print(f"❌ Błąd podczas aktualizacji nauczycieli: {e}")
         return []
+
 
 def update_grupy(kierunki, upsert=True):
     """Aktualizuje grupy dla podanych kierunków."""
@@ -275,7 +286,7 @@ def update_grupy(kierunki, upsert=True):
 
         for kierunek in kierunki:
             nazwa_kierunku = kierunek.get('nazwa_kierunku')
-            link_kierunku = kierunek.get('link_kierunku')
+            link_kierunku = kierunek.get('link_strony_kierunku') or kierunek.get('link_kierunku')  # obsługa obu nazw
             id_kierunku = kierunek.get('id')
             wydzial = kierunek.get('wydzial', 'Nieznany wydział')
 
@@ -283,34 +294,28 @@ def update_grupy(kierunki, upsert=True):
                 continue
 
             print(f"🔍 Pobieram grupy dla kierunku: {nazwa_kierunku}")
-            # Przekazujemy obiekt kierunku w liście zamiast samego linku
             kierunek_obj = {
+                'id': id_kierunku,
                 'nazwa_kierunku': nazwa_kierunku,
-                'wydzial': wydzial,
-                'kierunek_id': id_kierunku,
-                'link_kierunku': link_kierunku
+                'link_strony_kierunku': link_kierunku,
+                'wydzial': wydzial
             }
+
             grupy = scrape_grupy_for_kierunki([kierunek_obj])
 
-            # Sprawdzamy czy grupy są listą słowników
             if not grupy:
-                print(f"⚠️ Brak grup dla kierunku {nazwa_kierunku}")
                 continue
 
             if not isinstance(grupy, list):
-                print(f"⚠️ Nieprawidłowy format danych grup: {type(grupy)}. Oczekiwano listy.")
                 continue
 
             valid_grupy = []
             for grupa in grupy:
-                if isinstance(grupa, dict):
+                if isinstance(grupa, dict) and 'kierunek_id' not in grupa:
                     grupa['kierunek_id'] = id_kierunku
-                    valid_grupy.append(grupa)
-                else:
-                    print(f"⚠️ Pomijam nieprawidłowy format grupy: {type(grupa)}")
+                valid_grupy.append(grupa)
 
             if not valid_grupy:
-                print(f"⚠️ Brak prawidłowych grup dla kierunku {nazwa_kierunku}")
                 continue
 
             print(f"📌 Znaleziono {len(valid_grupy)} grup dla kierunku {nazwa_kierunku}")
@@ -326,62 +331,55 @@ def update_grupy(kierunki, upsert=True):
         to_update = []
         to_insert = []
 
-        # Sprawdź i skróć zbyt długie wartości przed zapisem
         for grupa in wszystkie_grupy:
             # Skracanie zgodnie z limitami w bazie danych
             if isinstance(grupa.get('kod_grupy'), str) and len(grupa['kod_grupy']) > 50:
-                grupa['kod_grupy'] = grupa['kod_grupy'][:47] + "..."
-                print(f"⚠️ Skrócono kod_grupy dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
+                grupa['kod_grupy'] = grupa['kod_grupy'][:47] + '...'
 
             if isinstance(grupa.get('tryb_studiow'), str) and len(grupa['tryb_studiow']) > 50:
-                grupa['tryb_studiow'] = grupa['tryb_studiow'][:47] + "..."
-                print(f"⚠️ Skrócono tryb_studiow dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
+                grupa['tryb_studiow'] = grupa['tryb_studiow'][:47] + '...'
 
             if isinstance(grupa.get('link_ics_grupy'), str) and len(grupa['link_ics_grupy']) > 255:
-                grupa['link_ics_grupy'] = grupa['link_ics_grupy'][:252] + "..."
-                print(f"⚠️ Skrócono link_ics_grupy dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
+                grupa['link_ics_grupy'] = grupa['link_ics_grupy'][:252] + '...'
 
             if isinstance(grupa.get('link_grupy'), str) and len(grupa['link_grupy']) > 255:
-                grupa['link_grupy'] = grupa['link_grupy'][:252] + "..."
-                print(f"⚠️ Skrócono link_grupy dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
+                grupa['link_grupy'] = grupa['link_grupy'][:252] + '...'
 
             if isinstance(grupa.get('semestr'), str) and len(grupa['semestr']) > 255:
-                grupa['semestr'] = grupa['semestr'][:252] + "..."
-                print(f"⚠️ Skrócono semestr dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
+                grupa['semestr'] = grupa['semestr'][:252] + '...'
 
             link_ics = grupa.get('link_ics_grupy')
 
             if link_ics in existing_map:
-                # Do aktualizacji
                 grupa['id'] = existing_map[link_ics]
                 to_update.append({
                     'id': grupa['id'],
-                    'kod_grupy': grupa['kod_grupy'],
-                    'kierunek_id': grupa['kierunek_id'],
-                    'semestr': grupa.get('semestr', ''),
-                    'tryb_studiow': grupa.get('tryb_studiow', ''),
-                    'link_grupy': grupa.get('link_grupy', ''),
+                    'kod_grupy': grupa.get('kod_grupy'),
+                    'tryb_studiow': grupa.get('tryb_studiow'),
+                    'kierunek_id': grupa.get('kierunek_id'),
+                    'link_grupy': grupa.get('link_grupy'),
+                    'link_ics_grupy': link_ics,
+                    'semestr': grupa.get('semestr')
                 })
             else:
-                # Do dodania
                 to_insert.append({
-                    'kod_grupy': grupa['kod_grupy'],
-                    'kierunek_id': grupa['kierunek_id'],
+                    'kod_grupy': grupa.get('kod_grupy'),
+                    'tryb_studiow': grupa.get('tryb_studiow'),
+                    'kierunek_id': grupa.get('kierunek_id'),
+                    'link_grupy': grupa.get('link_grupy'),
                     'link_ics_grupy': link_ics,
-                    'semestr': grupa.get('semestr', ''),
-                    'tryb_studiow': grupa.get('tryb_studiow', ''),
-                    'link_grupy': grupa.get('link_grupy', '')
+                    'semestr': grupa.get('semestr')
                 })
 
         # Wykonaj wsadowe operacje
         if to_insert:
             insert_result = supabase.table('grupy').insert(to_insert).execute()
             if insert_result.data:
-                insert_idx = 0
-                for grupa in wszystkie_grupy:
-                    if grupa.get('id') is None:
-                        grupa['id'] = insert_result.data[insert_idx]['id']
-                        insert_idx += 1
+                for i, data in enumerate(insert_result.data):
+                    if i < len(wszystkie_grupy):
+                        if 'link_ics_grupy' in wszystkie_grupy[i] and wszystkie_grupy[i][
+                            'link_ics_grupy'] not in existing_map:
+                            wszystkie_grupy[i]['id'] = data['id']
 
         # Aktualizuj istniejące rekordy
         if to_update:
