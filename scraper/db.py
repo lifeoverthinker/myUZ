@@ -238,7 +238,7 @@ def update_nauczyciele(grupy=None):
                     'imie_nazwisko': nauczyciel.get('imie_nazwisko', ''),
                     'instytut': nauczyciel.get('instytut', ''),
                     'email': email,
-                    'link_planu': nauczyciel.get('link_ics', '')
+                    'link_plan_nauczyciela': nauczyciel.get('link_ics', '')  # BŁĄD w nazwie kolumny
                 })
 
                 # Zapisz relację poprzez tabelę zajęcia
