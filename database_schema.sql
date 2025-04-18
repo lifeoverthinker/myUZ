@@ -40,37 +40,6 @@ CREATE TABLE public.nauczyciele_grupy (
 CREATE INDEX IF NOT EXISTS idx_nauczyciele_grupy_nauczyciel ON public.nauczyciele_grupy USING btree (nauczyciel_id);
 CREATE INDEX IF NOT EXISTS idx_nauczyciele_grupy_grupa ON public.nauczyciele_grupy USING btree (grupa_id);
 
-CREATE TABLE public.plany_grup (
-  id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
-  grupa_id uuid NULL,
-  link_ics_grupy character varying(255) NULL,
-  nauczyciel_id uuid NULL,
-  od timestamp without time zone NULL,
-  do_ timestamp without time zone NULL,
-  przedmiot text NULL,
-  rz character varying(10) NULL,
-  miejsce character varying(255) NULL,
-  podgrupa character varying(20) NULL,
-  CONSTRAINT plany_grup_pkey PRIMARY KEY (id),
-  CONSTRAINT plany_grup_grupa_id_fkey FOREIGN KEY (grupa_id) REFERENCES grupy(id),
-  CONSTRAINT plany_grup_nauczyciel_id_fkey FOREIGN KEY (nauczyciel_id) REFERENCES nauczyciele(id)
-);
-CREATE INDEX IF NOT EXISTS idx_plany_grup_nauczyciel ON public.plany_grup USING btree (nauczyciel_id);
-
-CREATE TABLE public.plany_nauczycieli (
-  id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
-  nauczyciel_id uuid NULL,
-  link_ics_nauczyciela character varying(255) NULL,
-  od timestamp without time zone NULL,
-  do_ timestamp without time zone NULL,
-  przedmiot text NULL,
-  rz character varying(10) NULL,
-  grupy character varying(255) NULL,
-  miejsce character varying(255) NULL,
-  CONSTRAINT plany_nauczycieli_pkey PRIMARY KEY (id),
-  CONSTRAINT plany_nauczycieli_nauczyciel_id_fkey FOREIGN KEY (nauczyciel_id) REFERENCES nauczyciele(id)
-);
-
 CREATE TABLE public.zajecia (
   id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
   przedmiot text NULL,
@@ -109,6 +78,8 @@ CREATE TABLE public.zajecia_nauczyciele (
   CONSTRAINT zajecia_nauczyciele_zajecia_id_fkey FOREIGN KEY (zajecia_id) REFERENCES zajecia(id)
 );
 CREATE INDEX IF NOT EXISTS idx_zajecia_nauczyciele_nauczyciel ON public.zajecia_nauczyciele USING btree (nauczyciel_id);
+
+
 
 Allow insert for service role
 

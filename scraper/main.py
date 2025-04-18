@@ -73,20 +73,19 @@ def main():
         naucz_count = 0
         if nauczyciele:
             for nauczyciel in nauczyciele:
-                # Zaktualizowana nazwa kolumny
-                ics_link = nauczyciel.get('link_ics_nauczyciela')
+                # Zaktualizowana nazwa kolumny - popraw na link_plan_nauczyciela
+                ics_link = nauczyciel.get('link_plan_nauczyciela')
 
                 if ics_link and 'id' in nauczyciel:
-                    print(f"📥 Pobieram plan dla nauczyciela {nauczyciel.get('nazwisko', 'bez nazwiska')}...")
+                    print(f"📥 Pobieram plan dla nauczyciela {nauczyciel.get('imie_nazwisko', 'bez nazwiska')}...")
                     try:
                         ics_data = download_ics(ics_link)
                         events = parse_ics(ics_data, nauczyciel_id=nauczyciel['id'])
                         nauczyciel_events.extend(events)
                         naucz_count += 1
                     except Exception as e:
-                        print(f"❌ Błąd pobierania planu nauczyciela {nauczyciel.get('nazwisko', 'bez nazwiska')}: {e}")
-
-            # Zapisz zbiorczo wydarzenia nauczycieli
+                        print(
+                            f"❌ Błąd pobierania planu nauczyciela {nauczyciel.get('imie_nazwisko', 'bez nazwiska')}: {e}")            # Zapisz zbiorczo wydarzenia nauczycieli
             if nauczyciel_events:
                 save_events(nauczyciel_events, "nauczyciel")
                 print(f"✅ Zapisano plany dla {naucz_count} nauczycieli ({len(nauczyciel_events)} wydarzeń)")

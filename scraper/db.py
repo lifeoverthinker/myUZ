@@ -131,7 +131,8 @@ def save_nauczyciele(nauczyciele):
         print(f"❌ Błąd podczas zapisywania nauczycieli: {e}")
         return []
 
-def save_events(events: list[dict]) -> None:
+
+def save_events(events: list[dict], source_type: str = None) -> None:
     """Zapisuje wydarzenia (zajęcia) do bazy danych."""
     if not events:
         return
@@ -141,16 +142,22 @@ def save_events(events: list[dict]) -> None:
         events_data = []
 
         for event in events:
-            events_data.append({
+            event_data = {
                 'przedmiot': event.get('przedmiot'),
                 'od': event.get('od'),
                 'do_': event.get('do_'),
                 'miejsce': event.get('miejsce'),
                 'rz': event.get('rz'),
-                'link_ics_zrodlowy': event.get('link_ics'),  # poprawna nazwa kolumny
+                'link_ics_zrodlowy': event.get('link_ics'),
                 'podgrupa': event.get('pg'),
                 'uid': event.get('uid')
-            })
+            }
+
+            # Dodaj typ źródła jeśli przekazany
+            if source_type:
+                event_data['source_type'] = source_type
+
+            events_data.append(event_data)
 
         # Wsadowe dodanie wydarzeń
         if events_data:
