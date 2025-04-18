@@ -219,7 +219,7 @@ def update_nauczyciele(grupy=None):
                     'tytul': nauczyciel.get('tytul', ''),
                     'instytut': nauczyciel.get('instytut', ''),
                     'link_nauczyciela': nauczyciel.get('link_nauczyciela', ''),
-                    'link_ics': nauczyciel.get('link_ics', '')
+                    'link_planu': nauczyciel.get('link_ics', '')  # Poprawiona nazwa kolumny
                 })
 
                 # Zapisz relację
@@ -236,7 +236,7 @@ def update_nauczyciele(grupy=None):
                     'email': email,
                     'instytut': nauczyciel.get('instytut', ''),
                     'link_nauczyciela': nauczyciel.get('link_nauczyciela', ''),
-                    'link_ics': nauczyciel.get('link_ics', '')
+                    'link_planu': nauczyciel.get('link_ics', '')  # Poprawiona nazwa kolumny
                 })
 
         # Wykonaj wsadowe operacje
@@ -270,7 +270,6 @@ def update_nauczyciele(grupy=None):
     except Exception as e:
         print(f"❌ Błąd podczas aktualizacji nauczycieli: {e}")
         return []
-
 
 def update_grupy(kierunki, upsert=True):
     """Aktualizuje grupy dla podanych kierunków."""
