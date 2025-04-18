@@ -6,6 +6,7 @@ from supabase import create_client
 from scraper.scrapers.kierunki_scraper import scrape_kierunki
 from scraper.scrapers.grupy_scraper import scrape_grupy_for_kierunki
 from scraper.parsers.nauczyciel_parser import scrape_nauczyciele_from_grupy
+import datetime
 
 load_dotenv()
 
@@ -142,10 +143,14 @@ def save_events(events: list[dict], source_type: str = None) -> None:
         events_data = []
 
         for event in events:
+            # Konwersja datetime na ISO format dla pól od/do
+            od = event.get('od')
+            do_ = event.get('do_')
+
             event_data = {
                 'przedmiot': event.get('przedmiot'),
-                'od': event.get('od'),
-                'do_': event.get('do_'),
+                'od': od.isoformat() if isinstance(od, datetime.datetime) else od,
+                'do_': do_.isoformat() if isinstance(do_, datetime.datetime) else do_,
                 'miejsce': event.get('miejsce'),
                 'rz': event.get('rz'),
                 'link_ics_zrodlowy': event.get('link_ics'),
@@ -167,9 +172,13 @@ def save_events(events: list[dict], source_type: str = None) -> None:
             # Tworzenie powiązań z grupami i nauczycielami
             if result.data:
                 _utworz_powiazania_zajecia(result.data, events)
+            else:
+                print("⚠️ Brak danych w odpowiedzi po zapisie wydarzeń")
 
     except Exception as e:
         print(f"❌ Błąd podczas zapisywania wydarzeń: {e}")
+        import traceback
+        traceback.print_exc()  # Drukuje pełny stack trace dla identyfikacji problemu
 
 def update_kierunki(upsert=True):
     """Aktualizuje kierunki z funkcją upsert."""

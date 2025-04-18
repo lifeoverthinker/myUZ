@@ -184,58 +184,70 @@ def fetch_grupa_semestr(url: str) -> str:
     return "nieznany"
 
 
-def parse_grupy(html: str, kierunek: str, wydzial: str, kierunek_id: int = None) -> list[dict]:
-    """Parsuje HTML strony kierunku i wydobywa grupy."""
-    soup = BeautifulSoup(html, "html.parser")
-    wynik = []
+def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
+    """Parsuje grupy z HTML."""
+    soup = BeautifulSoup(html, 'html.parser')
+    grupy = []
 
-    grupy_items = soup.find_all("tr", class_=["odd", "even"])
-    if not grupy_items:
-        print(f"❌ Nie znaleziono grup dla kierunku: {kierunek}")
-        return wynik
+    try:
+        # Znajdź informację o semestrze w nagłówku H3
+        semestr = None
+        h3_tags = soup.find_all("h3")
+        for h3 in h3_tags:
+            text = h3.text.lower()
+            if "semestr letni" in text:
+                semestr = "letni"
+                break
+            elif "semestr zimowy" in text:
+                semestr = "zimowy"
+                break
 
-    for item in grupy_items:
-        a_tag = item.find("a")
-        if a_tag:
-            pelna_nazwa = a_tag.get_text(strip=True)
+        # Jeśli nie znaleziono semestru, ustaw wartość domyślną
+        if not semestr:
+            semestr = "nieznany"
 
-            # Zachowaj pełny kod grupy
-            kod_grupy = pelna_nazwa.strip()
+        # Znajdź wszystkie wiersze tabeli z linkami do grup
+        rows = soup.select("tr.odd td a, tr.even td a")
 
-            # Sprawdzamy, czy kod grupy nie jest za długi
-            if len(kod_grupy) > 20:
-                kod_grupy = kod_grupy[:17] + "..."
-                print(f"⚠️ Skrócono kod_grupy: {kod_grupy}")
+        for row in rows:
+            link = row.get('href')
+            kod_grupy = row.text.strip()
 
-            # Precyzyjne określenie trybu studiów
-            tryb_studiow = "nieznany"
-            if "stacjonarne" in pelna_nazwa.lower():
-                tryb_studiow = "stacjonarne"
-            elif "niestacjonarne" in pelna_nazwa.lower():
-                tryb_studiow = "niestacjonarne"
+            if not link or not kod_grupy:
+                continue
 
-            link_grupy = BASE_URL + a_tag["href"]
-            grupa_id = a_tag["href"].split("ID=")[1].split("&")[0] if "ID=" in a_tag["href"] else None
-            link_grupy_ics = link_grupy.replace("grupy_plan.php?ID=", "grupy_ics.php?ID=") + "&KIND=GG"
+            # Ekstrakcja informacji o trybie studiów
+            parts = kod_grupy.split('/')
+            tryb_studiow = parts[1].strip() if len(parts) > 1 else "nieznany"
 
-            # Pobierz semestr ze strony grupy
-            semestr = fetch_grupa_semestr(link_grupy)
+            # Przygotuj pełne URL do planu grupy
+            full_link = f"{BASE_URL}{link}" if link and not link.startswith('http') else link
 
-            grupa_data = {
-                "kod_grupy": kod_grupy,
-                "tryb_studiow": tryb_studiow,
-                "kierunek": kierunek,
-                "wydzial": wydzial,
-                "link_grupy": link_grupy,
-                "link_ics_grupy": link_grupy_ics,
-                "semestr": semestr,
-                "grupa_id": grupa_id
-            }
+            # Wydobycie ID grupy z linku
+            grupa_id = None
+            if "ID=" in link:
+                try:
+                    grupa_id = link.split("ID=")[1].split("&")[0]
+                except (IndexError, ValueError):
+                    pass
 
-            if kierunek_id:
-                grupa_data["kierunek_id"] = kierunek_id
+            # Generuj link do pliku ICS
+            ics_link = f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG" if grupa_id else None
 
-            wynik.append(grupa_data)
-            print(f"📌 Dodano grupę: {kod_grupy} ({kierunek})")
+            if grupa_id:
+                grupa = {
+                    'grupa_id': grupa_id,
+                    'kod_grupy': kod_grupy,
+                    'kierunek_id': kierunek_id,
+                    'wydzial': wydzial,
+                    'tryb_studiow': tryb_studiow,
+                    'semestr': semestr,
+                    'link_grupy': full_link,
+                    'link_ics_grupy': ics_link
+                }
+                grupy.append(grupa)
 
-    return wynik
+        return grupy
+    except Exception as e:
+        print(f"❌ Błąd parsowania grup: {e}")
+        return []
