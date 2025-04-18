@@ -133,7 +133,7 @@ def save_nauczyciele(nauczyciele):
         return []
 
 
-def save_events(events: list[dict], source_type: str = None) -> None:
+def save_events(events: list[dict]) -> None:
     """Zapisuje wydarzenia (zajęcia) do bazy danych."""
     if not events:
         return
@@ -158,10 +158,6 @@ def save_events(events: list[dict], source_type: str = None) -> None:
                 'uid': event.get('uid')
             }
 
-            # Dodaj typ źródła jeśli przekazany
-            if source_type:
-                event_data['source_type'] = source_type
-
             events_data.append(event_data)
 
         # Wsadowe dodanie wydarzeń
@@ -178,7 +174,7 @@ def save_events(events: list[dict], source_type: str = None) -> None:
     except Exception as e:
         print(f"❌ Błąd podczas zapisywania wydarzeń: {e}")
         import traceback
-        traceback.print_exc()  # Drukuje pełny stack trace dla identyfikacji problemu
+        traceback.print_exc()
 
 def update_kierunki(upsert=True):
     """Aktualizuje kierunki z funkcją upsert."""

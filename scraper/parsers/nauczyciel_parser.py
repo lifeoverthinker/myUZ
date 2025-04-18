@@ -1,111 +1,36 @@
-"""
-<H2>Plan zajęć</H2><H2>dr Łukasz Janeczek</H2><H3>Instytut Historii</H3><H4><a href="mailto:l.janeczek@ih.uz.zgora.pl">l.janeczek@ih.uz.zgora.pl</a></H4>
-<!-- Nav tabs -->
-    <ul class="nav nav-tabs" role="tablist">
-      <li class="active">
-          <a href="#groups" role="tab" data-toggle="tab">
-              Tygodniowy
-          </a>
-      </li>
-      <li><a href="#details" role="tab" data-toggle="tab">
-              Szczegółowy
-          </a>
-      </li>
-
-        <li class="pull-right dropdown">
-            <a class="btn btn-success dropdown-toggle" style="margin-top: 4px;"  data-toggle="dropdown" href="#">Pobierz kalendarz (ICS) <span class="caret"></span></a>
-            <ul class="dropdown-menu">
-
-              <li class="hz">
-                    <a href="https://plan.uz.zgora.pl//nauczyciel_ics.php?ID=37051&KIND=GG" id="idGG" target="_blank">Google</a>
-                    <a href="#"  data-toggle="tooltip" data-placement="top"  data-html="true" title="Kopiuj link do schowka" onclick="copyTextToClipboard('idGG');"><i class="fa fa-copy"></i></a>
-              </li>
-              <li class="divider"></li>
-              <li class="hz">
-                    <a href="https://plan.uz.zgora.pl//nauczyciel_ics.php?ID=37051&KIND=TB" id="idTB" target="_blank">Thunderbird</a>
-                    <a href="#"  data-toggle="tooltip" data-placement="top"  data-html="true" title="Kopiuj link do schowka" onclick="copyTextToClipboard('idTB');"><i class="fa fa-copy"></i></a>
-              </li>
-              <li class="divider"></li>
-              <li class="hz">
-                    <a href="https://plan.uz.zgora.pl//nauczyciel_ics.php?ID=37051&KIND=MS" id="idMS" target="_blank">Microsoft / Zimbra</a>
-                    <a href="#"  data-toggle="tooltip" data-placement="top"  data-html="true" title="Kopiuj link do schowka" onclick="copyTextToClipboard('idMS');"><i class="fa fa-copy"></i></a>
-              </li>
-            </ul>
-        </li>
-    </ul>
-	  <div id="filter_div" class="filter_div">
-		<b>Filtr: </b>
-        <div class="label_main">
-			<div class="label">
-				<label> Tydzień <input type="checkbox" id="week" name="week" checked onclick="clickWeek()" />: </label>
-				<label> <input type="checkbox" id="day1" name="day1" checked onclick="applyFilters()" /> Po </label>
-				<label> <input type="checkbox" id="day2" name="day2" checked onclick="applyFilters()" /> Wt </label>
-				<label> <input type="checkbox" id="day3" name="day3" checked onclick="applyFilters()" /> Śr </label>
-				<label> <input type="checkbox" id="day4" name="day4" checked onclick="applyFilters()" /> Cz </label>
-				<label> <input type="checkbox" id="day5" name="day5" checked onclick="applyFilters()" /> Pi </label>
-			</div>
-			<div class="label">
-				<label> Weekend <input type="checkbox" id="weekend" name="weekend" checked onclick="clickWeekEnd()" />: </label>
-				<label> <input type="checkbox" id="day6" name="day6" checked onclick="applyFilters()" /> So </label>
-				<label> <input type="checkbox" id="day7" name="day7" checked onclick="applyFilters()" /> Ni </label>
-			</div>
-			<div class="label">
-				<label> Nieregularne (Nr) <input type="checkbox" id="dayn" name="dayn" checked onclick="applyFilters()" /> </label>
-			</div>
-			<div class="label">
-				<label> RZ: </label>
-				<label> <input type="checkbox" id="rzD" name="rzD" checked onclick="applyFilters()" /> Dydaktyczne </label>
-				<label> <input type="checkbox" id="rzR" name="rzR" checked onclick="applyFilters()" /> Rezerwacje </label>
-				<label> <input type="checkbox" id="rzE" name="rzE" checked onclick="applyFilters()" /> Egzaminy </label>
-			</div>
-
-        </div>
-		<p style="margin-top: 6px; padding-top: 6px;  border-top: 1px solid #d0d0d0;"><p>Legenda: <a href="rodzaje_zajec.php">RZ - rodzaj zajęć</a>; jeżeli w rodzaju zajęć pojawi się symbol [X] oznacza to, że osoba uczestniczy w zajęciach jako słuchacz.  <br />
-<img class="classroom_icon_stand" /> - zajęcia bezpośrednie (na terenie UZ), <img class="classroom_icon_distant" /> - zajęcia prowadzone zdalnie.</p>
-      </div>
-
-
-<!-- -->
-    <div class="tab-content">
-      <div class="tab-pane fade active in" id="groups">
-<!-- -->
-
-<TABLE id="table_groups" class="table table-bordered table-condensed">
-    <tr class="gray">
-        <th align="center" width="3%">Od</th>
-        <th align="center" width="3%">Do</th>
-        <th width="32%">Przedmiot</th>
-        <th width="2%">RZ</th>
-        <th width="25%">Grupy</th>
-        <th width="15%">Miejsce</th>
-        <th width="20%">Terminy</th>
-    </tr>
-
-          <tr class="gray" id="label_day1">
-              <td colspan="7" width="100%" class="gray-day">Poniedziałek</td>
-          </tr>
-
-    <TR class="even day1 rzD">
-        <td align="center">09:45</td>
-        <td align="center">11:15</td>
-        <td>Historia regionalna - XIX wiek  <a href="https://classroom.google.com/c/NzY0NzUzNDAwMjg2"><img  data-toggle="tooltip" data-placement="top"  data-html="true" src="img/link-classroom.png"  title="Google Classroom" /></a> </td>
-        <td><label  data-toggle="tooltip" data-placement="top"  data-html="true" class="rz" title="Ć - Ćwiczenia">Ć</label></td>
-        <td><a href="grupy_plan.php?ID=29183">21H-SP23</a></td>
-        <td><img  data-toggle="tooltip" data-placement="top"  data-html="true" title="Zajęcia bezpośrednie" class="classroom_icon_stand" /> <a href="sale_plan.php?ID=3089">217 A-16</a></td>
-        <td><a href="kalendarze_lista_szczegoly.php?ID=2428">D</a></td>
-    </tr>
-
-          <tr class="gray" id="label_day2">
-              <td colspan="7" width="100%" class="gray-day">Wtorek</td>
-          </tr>
-"""
-
 import requests
 from bs4 import BeautifulSoup
 import concurrent.futures
 from functools import lru_cache
+import sys
+import os
+
+# Dodaj ścieżkę projektu do sys.path dla importów z katalogu nadrzędnego
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scraper.scrapers.kierunki_scraper import scrape_kierunki
+from scraper.scrapers.grupy_scraper import scrape_grupy_for_kierunki
 
 BASE_URL = "https://plan.uz.zgora.pl/"
+
+
+def sanitize_string(text):
+    """Oczyszcza ciąg znaków z nieprawidłowych kodowań i znaków binarnych."""
+    if text is None:
+        return None
+
+    if not isinstance(text, str):
+        return str(text)
+
+    # Poprawna lista polskich znaków
+    polish_chars = "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ"
+
+    # Zachowaj tylko znaki drukowalne i polskie znaki
+    result = ""
+    for char in text:
+        if char.isprintable() or char in polish_chars:
+            result += char
+
+    return result
 
 
 @lru_cache(maxsize=500)
@@ -154,7 +79,9 @@ def parse_nauczyciele_from_group_page(html: str, grupa_id: str = None) -> list[d
                 nauczyciel_data["grupa_id"] = grupa_id
 
             wynik.append(nauczyciel_data)
-            print(f"🧑‍🏫 Znaleziono nauczyciela: {nauczyciel_name}")
+
+            # Używamy funkcji sanitize_string do oczyszczania tekstu przed wyświetleniem
+            print(f"🧑‍🏫 Znaleziono nauczyciela: {sanitize_string(nauczyciel_name)}")
 
     return wynik
 
@@ -207,7 +134,7 @@ def fetch_and_parse_nauczyciel(nauczyciel_data: dict) -> dict:
     html = fetch_page(link)
 
     if not html:
-        print(f"❌ Nie udało się pobrać strony nauczyciela: {nauczyciel_data['nazwa']}")
+        print(f"❌ Nie udało się pobrać strony nauczyciela: {sanitize_string(nauczyciel_data['nazwa'])}")
         return nauczyciel_data
 
     szczegoly = parse_nauczyciel_details(html)
@@ -236,7 +163,7 @@ def scrape_nauczyciele_from_grupy(grupy: list[dict], max_workers=10) -> list[dic
         zadania = {}
         for grupa in grupy:
             kod_grupy = grupa['kod_grupy']
-            link_grupy = grupa['link_grupy']  # Poprawiona nazwa klucza
+            link_grupy = grupa['link_grupy']
             grupa_id = grupa.get('grupa_id') or grupa.get('id')
             zadania[executor.submit(pobierz_nauczycieli_z_grupy, link_grupy, grupa_id)] = kod_grupy
 
@@ -276,8 +203,8 @@ def scrape_nauczyciele_from_grupy(grupy: list[dict], max_workers=10) -> list[dic
 
 if __name__ == "__main__":
     # Dla samodzielnego testowania
-    from kierunki_scraper import scrape_kierunki
-    from grupy_scraper import scrape_grupy_for_kierunki
+    from scraper.scrapers.kierunki_scraper import scrape_kierunki
+    from scraper.scrapers.grupy_scraper import scrape_grupy_for_kierunki
 
     kierunki = scrape_kierunki()
     # Testujemy tylko na kilku pierwszych kierunkach
@@ -287,4 +214,5 @@ if __name__ == "__main__":
 
     print(f"\nPobrano {len(nauczyciele)} nauczycieli.")
     for n in nauczyciele:
-        print(f"Nauczyciel: {n.get('pelne_imie', n.get('nazwa'))}, Email: {n.get('email', 'brak')}")
+        sanitized_name = sanitize_string(n.get('pelne_imie', n.get('nazwa')))
+        print(f"Nauczyciel: {sanitized_name}, Email: {n.get('email', 'brak')}")

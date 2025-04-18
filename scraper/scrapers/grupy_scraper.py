@@ -40,6 +40,18 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
     grupy = []
 
     try:
+        # Znajdź informację o semestrze w nagłówku H3
+        semestr = "nieznany"
+        h3_tags = soup.find_all("h3")
+        for h3 in h3_tags:
+            text = h3.text.lower()
+            if "semestr letni" in text:
+                semestr = "letni"
+                break
+            elif "semestr zimowy" in text:
+                semestr = "zimowy"
+                break
+
         # Znajdź wszystkie wiersze tabeli z linkami do grup
         rows = soup.select("tr.odd td a, tr.even td a")
 
@@ -50,12 +62,16 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
             if not link or not kod_grupy:
                 continue
 
-            # Ekstrakcja informacji o trybie studiów
-            parts = kod_grupy.split('/')
-            tryb_studiow = parts[1].strip() if len(parts) > 1 else "nieznany"
-
-            # Ekstrakcja semestru (np. "21H-SD23" -> "2")
-            semestr = kod_grupy.split('-')[0][0] if '-' in kod_grupy else ""
+            # Tryb studiów - potrzebujemy go wyciągnąć z nagłówka H3
+            tryb_studiow = "nieznany"
+            for h3 in h3_tags:
+                text = h3.text.lower()
+                if "stacjonarne" in text:
+                    tryb_studiow = "stacjonarne"
+                    break
+                elif "niestacjonarne" in text:
+                    tryb_studiow = "niestacjonarne"
+                    break
 
             # Przygotuj pełne URL do planu grupy
             full_link = f"{BASE_URL}{link}" if link and not link.startswith('http') else link
