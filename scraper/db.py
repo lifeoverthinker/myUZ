@@ -61,10 +61,14 @@ def save_kierunki(kierunki):
     # Przygotuj dane w formacie do wsadowego dodania
     batch_data = []
     for kierunek in kierunki:
+        # Synchronizacja nazw pól
+        if 'link_kierunku' in kierunek and 'link_strony_kierunku' not in kierunek:
+            kierunek['link_strony_kierunku'] = kierunek.pop('link_kierunku')
+
         batch_data.append({
             'nazwa_kierunku': kierunek.get('nazwa_kierunku'),
             'wydzial': kierunek.get('wydzial'),
-            'link_strony_kierunku': kierunek.get('link_kierunku')  # poprawna nazwa kolumny
+            'link_strony_kierunku': kierunek.get('link_strony_kierunku')
         })
 
     try:
@@ -165,6 +169,11 @@ def update_kierunki(upsert=True):
     try:
         kierunki_data = scrape_kierunki()
 
+        # Synchronizacja nazw pól
+        for kierunek in kierunki_data:
+            if 'link_kierunku' in kierunek and 'link_strony_kierunku' not in kierunek:
+                kierunek['link_strony_kierunku'] = kierunek.pop('link_kierunku')
+
         if not upsert:
             return save_kierunki(kierunki_data)
 
@@ -176,7 +185,7 @@ def update_kierunki(upsert=True):
         to_insert = []
 
         for kierunek in kierunki_data:
-            link = kierunek.get('link_kierunku')  # Pole z funkcji scrape_kierunki
+            link = kierunek.get('link_strony_kierunku')
 
             if link in existing_map:
                 kierunek['id'] = existing_map[link]
@@ -184,13 +193,13 @@ def update_kierunki(upsert=True):
                     'id': kierunek['id'],
                     'nazwa_kierunku': kierunek.get('nazwa_kierunku'),
                     'wydzial': kierunek.get('wydzial'),
-                    'link_strony_kierunku': link  # poprawna nazwa kolumny
+                    'link_strony_kierunku': link
                 })
             else:
                 to_insert.append({
                     'nazwa_kierunku': kierunek.get('nazwa_kierunku'),
                     'wydzial': kierunek.get('wydzial'),
-                    'link_strony_kierunku': link  # poprawna nazwa kolumny
+                    'link_strony_kierunku': link
                 })
 
         # Wykonaj wsadowe operacje
@@ -198,9 +207,8 @@ def update_kierunki(upsert=True):
             insert_result = supabase.table('kierunki').insert(to_insert).execute()
             if insert_result.data:
                 for i, data in enumerate(insert_result.data):
-                    if i < len(kierunki_data):
-                        if 'link_kierunku' in kierunki_data[i] and kierunki_data[i]['link_kierunku'] not in existing_map:
-                            kierunki_data[i]['id'] = data['id']
+                    if i < len(kierunki_data) and kierunki_data[i]['link_strony_kierunku'] not in existing_map:
+                        kierunki_data[i]['id'] = data['id']
 
         # Aktualizuj istniejące rekordy
         if to_update:
@@ -220,64 +228,82 @@ def update_nauczyciele(grupy=None):
 
     nauczyciele = scrape_nauczyciele_from_grupy(grupy)
 
+    # Synchronizacja nazw pól
+    for nauczyciel in nauczyciele:
+        if 'link_planu' in nauczyciel and 'link_plan_nauczyciela' not in nauczyciel:
+            nauczyciel['link_plan_nauczyciela'] = nauczyciel.pop('link_planu')
+        if 'link_nauczyciela' in nauczyciel and 'link_strony_nauczyciela' not in nauczyciel:
+            nauczyciel['link_strony_nauczyciela'] = nauczyciel.pop('link_nauczyciela')
+
     try:
         # Pobierz istniejących nauczycieli
-        existing = supabase.table('nauczyciele').select('id,email').execute()
-        existing_map = {n['email']: n['id'] for n in existing.data if n['email']}
+        existing = supabase.table('nauczyciele').select('id,email,imie_nazwisko').execute()
+        email_map = {n['email']: n['id'] for n in existing.data if n['email']}
+        nazwa_map = {n['imie_nazwisko']: n['id'] for n in existing.data if n['imie_nazwisko']}
 
         to_update = []
         to_insert = []
 
         for nauczyciel in nauczyciele:
-            email = nauczyciel.get('email', '')
-            if email and email in existing_map:
-                # Do aktualizacji
-                nauczyciel['id'] = existing_map[email]
+            email = nauczyciel.get('email')
+            imie_nazwisko = nauczyciel.get('imie_nazwisko')
+
+            if email and email in email_map:
+                nauczyciel['id'] = email_map[email]
                 to_update.append({
                     'id': nauczyciel['id'],
-                    'imie_nazwisko': nauczyciel.get('imie_nazwisko', ''),
-                    'instytut': nauczyciel.get('instytut', ''),
+                    'imie_nazwisko': imie_nazwisko,
+                    'instytut': nauczyciel.get('instytut'),
                     'email': email,
-                    'link_plan_nauczyciela': nauczyciel.get('link_ics', '')  # Poprawna nazwa kolumny
+                    'link_plan_nauczyciela': nauczyciel.get('link_plan_nauczyciela'),
+                    'link_strony_nauczyciela': nauczyciel.get('link_strony_nauczyciela')
                 })
-
-                # Zapisz relację poprzez tabelę zajęcia
-                if 'grupa_id' in nauczyciel and nauczyciel['grupa_id']:
-                    _utworz_powiazanie_nauczyciel_grupa(nauczyciel['id'], nauczyciel['grupa_id'])
-            else:
-                # Do dodania
-                to_insert.append({
-                    'imie_nazwisko': nauczyciel.get('imie_nazwisko', ''),
-                    'instytut': nauczyciel.get('instytut', ''),
+            elif imie_nazwisko and imie_nazwisko in nazwa_map:
+                nauczyciel['id'] = nazwa_map[imie_nazwisko]
+                to_update.append({
+                    'id': nauczyciel['id'],
+                    'imie_nazwisko': imie_nazwisko,
+                    'instytut': nauczyciel.get('instytut'),
                     'email': email,
-                    'link_plan_nauczyciela': nauczyciel.get('link_ics', '')
+                    'link_plan_nauczyciela': nauczyciel.get('link_plan_nauczyciela'),
+                    'link_strony_nauczyciela': nauczyciel.get('link_strony_nauczyciela')
+                })
+            else:
+                to_insert.append({
+                    'imie_nazwisko': imie_nazwisko,
+                    'instytut': nauczyciel.get('instytut'),
+                    'email': email,
+                    'link_plan_nauczyciela': nauczyciel.get('link_plan_nauczyciela'),
+                    'link_strony_nauczyciela': nauczyciel.get('link_strony_nauczyciela')
                 })
 
         # Wykonaj wsadowe operacje
         if to_insert:
             insert_result = supabase.table('nauczyciele').insert(to_insert).execute()
             if insert_result.data:
-                insert_idx = 0
-                for nauczyciel in nauczyciele:
-                    if nauczyciel.get('id') is None:
-                        nauczyciel['id'] = insert_result.data[insert_idx]['id']
-                        insert_idx += 1
+                for i, data in enumerate(insert_result.data):
+                    nauczyciel = next((n for n in nauczyciele if
+                        (n.get('email') not in email_map) and
+                        (n.get('imie_nazwisko') not in nazwa_map)), None)
+                    if nauczyciel:
+                        nauczyciel['id'] = data['id']
 
-                        # Analogiczne powiązanie dla nowych nauczycieli
-                        if 'grupa_id' in nauczyciel and nauczyciel['grupa_id']:
-                            _utworz_powiazanie_nauczyciel_grupa(nauczyciel['id'], nauczyciel['grupa_id'])
-
-        # Aktualizuj istniejących nauczycieli
+        # Aktualizuj istniejące rekordy
         if to_update:
             for item in to_update:
                 supabase.table('nauczyciele').update(item).eq('id', item['id']).execute()
+
+        # Tworzenie powiązań nauczyciel-grupa
+        for nauczyciel in nauczyciele:
+            if 'id' in nauczyciel and 'grupy_id' in nauczyciel:
+                for grupa_id in nauczyciel['grupy_id']:
+                    _utworz_powiazanie_nauczyciel_grupa(nauczyciel['id'], grupa_id)
 
         print(f"✅ Zaktualizowano {len(to_update)} nauczycieli, dodano {len(to_insert)} nowych")
         return nauczyciele
     except Exception as e:
         print(f"❌ Błąd podczas aktualizacji nauczycieli: {e}")
         return []
-
 
 def update_grupy(kierunki, upsert=True):
     """Aktualizuje grupy dla podanych kierunków."""
@@ -286,41 +312,26 @@ def update_grupy(kierunki, upsert=True):
 
         for kierunek in kierunki:
             nazwa_kierunku = kierunek.get('nazwa_kierunku')
-            # Poprawione pobieranie linku - najpierw sprawdza link_strony_kierunku (z bazy)
             link_kierunku = kierunek.get('link_strony_kierunku')
-            # Jeśli nie ma, szuka link_kierunku (ze scrapera)
-            if not link_kierunku:
-                link_kierunku = kierunek.get('link_kierunku')
-
             id_kierunku = kierunek.get('id')
             wydzial = kierunek.get('wydzial', 'Nieznany wydział')
 
-            # Rozszerzona walidacja linku
             if not id_kierunku:
                 print(f"⚠️ Brak ID dla kierunku: {nazwa_kierunku}")
                 continue
 
-            if not link_kierunku or link_kierunku == 'None' or link_kierunku is None:
+            if not link_kierunku:
                 print(f"⚠️ Brak poprawnego linku dla kierunku: {nazwa_kierunku}")
                 continue
-
-            # Sprawdzenie i naprawa formatu linku
-            if not isinstance(link_kierunku, str):
-                print(f"⚠️ Link nie jest tekstem: {nazwa_kierunku} - {type(link_kierunku)}")
-                continue
-
-            if not link_kierunku.startswith(('http://', 'https://')):
-                # Próba naprawy URL przez dodanie protokołu
-                print(f"⚠️ Naprawiam URL dla kierunku {nazwa_kierunku}: {link_kierunku}")
-                link_kierunku = 'https://' + link_kierunku.lstrip('/')
 
             print(f"🔍 Pobieram grupy dla kierunku: {nazwa_kierunku}")
             print(f"🔗 Link kierunku: {link_kierunku}")
 
+            # Przygotuj obiekt dla scrapera - uwaga na nazwy pól!
             kierunek_obj = {
                 'id': id_kierunku,
                 'nazwa_kierunku': nazwa_kierunku,
-                'link_strony_kierunku': link_kierunku,
+                'link_kierunku': link_kierunku,  # Dla scrapera potrzebne jako link_kierunku
                 'wydzial': wydzial
             }
 
@@ -402,8 +413,7 @@ def update_grupy(kierunki, upsert=True):
             if insert_result.data:
                 for i, data in enumerate(insert_result.data):
                     if i < len(wszystkie_grupy):
-                        if 'link_ics_grupy' in wszystkie_grupy[i] and wszystkie_grupy[i][
-                            'link_ics_grupy'] not in existing_map:
+                        if 'link_ics_grupy' in wszystkie_grupy[i] and wszystkie_grupy[i]['link_ics_grupy'] not in existing_map:
                             wszystkie_grupy[i]['id'] = data['id']
 
         # Aktualizuj istniejące rekordy
