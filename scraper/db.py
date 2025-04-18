@@ -281,13 +281,20 @@ def update_grupy(kierunki, upsert=True):
             nazwa_kierunku = kierunek.get('nazwa_kierunku')
             link_kierunku = kierunek.get('link_kierunku')
             id_kierunku = kierunek.get('id')
+            wydzial = kierunek.get('wydzial', 'Nieznany wydział')
 
             if not id_kierunku or not link_kierunku:
                 continue
 
             print(f"🔍 Pobieram grupy dla kierunku: {nazwa_kierunku}")
-            # Pobieranie grup
-            grupy = scrape_grupy_for_kierunki(link_kierunku)
+            # Przekazujemy obiekt kierunku w liście zamiast samego linku
+            kierunek_obj = {
+                'nazwa_kierunku': nazwa_kierunku,
+                'wydzial': wydzial,
+                'kierunek_id': id_kierunku,
+                'link_kierunku': link_kierunku
+            }
+            grupy = scrape_grupy_for_kierunki([kierunek_obj])
 
             # Sprawdzamy czy grupy są listą słowników
             if not grupy:

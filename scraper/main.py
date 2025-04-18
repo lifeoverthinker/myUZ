@@ -30,6 +30,7 @@ def main():
         if not grupy:
             print("❌ Nie udało się pobrać grup. Przerywanie.")
             return
+
         print(f"✅ Pobrano i zapisano {len(grupy)} grup")
 
         # 3. Scrapuj i zaktualizuj nauczycieli z grup
