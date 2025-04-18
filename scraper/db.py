@@ -290,7 +290,8 @@ def update_grupy(kierunki, upsert=True):
             id_kierunku = kierunek.get('id')
             wydzial = kierunek.get('wydzial', 'Nieznany wydział')
 
-            if not id_kierunku or not link_kierunku:
+            if not id_kierunku or not link_kierunku or link_kierunku == 'None':
+                print(f"⚠️ Brak poprawnego linku dla kierunku: {nazwa_kierunku}")
                 continue
 
             print(f"🔍 Pobieram grupy dla kierunku: {nazwa_kierunku}")
