@@ -216,10 +216,9 @@ def update_nauczyciele(grupy=None):
                 to_update.append({
                     'id': nauczyciel['id'],
                     'imie_nazwisko': nauczyciel.get('imie_nazwisko', ''),
-                    'tytul': nauczyciel.get('tytul', ''),
                     'instytut': nauczyciel.get('instytut', ''),
-                    'link_nauczyciela': nauczyciel.get('link_nauczyciela', ''),
-                    'link_planu': nauczyciel.get('link_ics', '')  # Poprawiona nazwa kolumny
+                    'email': email,
+                    'link_planu': nauczyciel.get('link_ics', '')  # Zgodne z definicją tabeli
                 })
 
                 # Zapisz relację
@@ -232,11 +231,9 @@ def update_nauczyciele(grupy=None):
                 # Do dodania
                 to_insert.append({
                     'imie_nazwisko': nauczyciel.get('imie_nazwisko', ''),
-                    'tytul': nauczyciel.get('tytul', ''),
-                    'email': email,
                     'instytut': nauczyciel.get('instytut', ''),
-                    'link_nauczyciela': nauczyciel.get('link_nauczyciela', ''),
-                    'link_planu': nauczyciel.get('link_ics', '')  # Poprawiona nazwa kolumny
+                    'email': email,
+                    'link_planu': nauczyciel.get('link_ics', '')  # Zgodne z definicją tabeli
                 })
 
         # Wykonaj wsadowe operacje

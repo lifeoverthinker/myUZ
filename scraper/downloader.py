@@ -36,16 +36,23 @@ def fetch_page_with_retry(url: str, max_retries=3, delay=1) -> str:
                 print(f"❌ Wszystkie próby nieudane: {e}")
                 return ""
 
-def download_ics(url: str) -> bytes:
-    """Pobiera plik ICS ze wskazanego URL."""
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
 
-        if response.text.strip().startswith("<!DOCTYPE HTML>"):
+def download_ics(url):
+    """Pobiera plik ICS i sprawdza czy faktycznie zawiera dane kalendarza."""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/calendar,text/plain,*/*'
+        }
+
+        response = requests.get(url, headers=headers, timeout=15)
+
+        # Sprawdź czy odpowiedź to faktycznie plik ICS
+        if 'BEGIN:VCALENDAR' in response.text:
+            return response.text
+        else:
             raise ValueError("URL nie zwraca pliku ICS, tylko HTML — prawdopodobnie zły link.")
 
-        return response.content
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Błąd pobierania pliku ICS: {e}")
-        return b""
+    except Exception as e:
+        # Przechwyć i przekaż dalej błąd
+        raise Exception(f"{e}")
