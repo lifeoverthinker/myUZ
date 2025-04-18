@@ -328,12 +328,22 @@ def update_grupy(kierunki, upsert=True):
 
         # Sprawdź i skróć zbyt długie wartości przed zapisem
         for grupa in wszystkie_grupy:
-            # Sprawdź i skróć wartości dłuższe niż 50 znaków
-            for key, value in grupa.items():
-                if isinstance(value, str) and len(value) > 50:
-                    if key in ['link_ics_grupy', 'link_grupy', 'kod_grupy', 'semestr', 'tryb_studiow']:
-                        grupa[key] = value[:47] + "..."
-                        print(f"⚠️ Skrócono {key} dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
+            # Skracanie zgodnie z limitami w bazie danych
+            if isinstance(grupa.get('kod_grupy'), str) and len(grupa['kod_grupy']) > 50:
+                grupa['kod_grupy'] = grupa['kod_grupy'][:47] + "..."
+                print(f"⚠️ Skrócono kod_grupy dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
+
+            if isinstance(grupa.get('tryb_studiow'), str) and len(grupa['tryb_studiow']) > 50:
+                grupa['tryb_studiow'] = grupa['tryb_studiow'][:47] + "..."
+                print(f"⚠️ Skrócono tryb_studiow dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
+
+            if isinstance(grupa.get('link_ics_grupy'), str) and len(grupa['link_ics_grupy']) > 255:
+                grupa['link_ics_grupy'] = grupa['link_ics_grupy'][:252] + "..."
+                print(f"⚠️ Skrócono link_ics_grupy dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
+
+            if isinstance(grupa.get('link_grupy'), str) and len(grupa['link_grupy']) > 255:
+                grupa['link_grupy'] = grupa['link_grupy'][:252] + "..."
+                print(f"⚠️ Skrócono link_grupy dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
 
             link_ics = grupa.get('link_ics_grupy')
 

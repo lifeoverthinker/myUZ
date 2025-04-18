@@ -38,21 +38,33 @@ def fetch_page_with_retry(url: str, max_retries=3, delay=1) -> str:
 
 
 def download_ics(url):
-    """Pobiera plik ICS i sprawdza czy faktycznie zawiera dane kalendarza."""
+    """Pobiera plik ICS z obsługą uwierzytelniania i przekierowań."""
     try:
+        session = requests.Session()
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'text/calendar,text/plain,*/*'
+            'Accept': 'text/calendar,application/octet-stream,*/*',
+            'Referer': 'https://plan.uz.zgora.pl/'
         }
 
-        response = requests.get(url, headers=headers, timeout=15)
+        # Najpierw pobierz stronę, która może zawierać ciasteczka sesji
+        session.get('https://plan.uz.zgora.pl/', headers=headers)
+
+        # Teraz pobierz faktyczny plik ICS
+        response = session.get(url, headers=headers, timeout=15, allow_redirects=True)
 
         # Sprawdź czy odpowiedź to faktycznie plik ICS
         if 'BEGIN:VCALENDAR' in response.text:
             return response.text
         else:
-            raise ValueError("URL nie zwraca pliku ICS, tylko HTML — prawdopodobnie zły link.")
+            # Spróbuj pobrać z innym parametrem
+            modified_url = url + "&authenticate=true" if "?" in url else url + "?authenticate=true"
+            response = session.get(modified_url, headers=headers, timeout=15)
+
+            if 'BEGIN:VCALENDAR' in response.text:
+                return response.text
+            else:
+                raise ValueError("URL nie zwraca pliku ICS, tylko HTML — prawdopodobnie zły link.")
 
     except Exception as e:
-        # Przechwyć i przekaż dalej błąd
         raise Exception(f"{e}")
