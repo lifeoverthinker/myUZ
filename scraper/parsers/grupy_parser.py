@@ -97,11 +97,17 @@
     </tr>
 """
 
+"""
+Moduł do parsowania danych dotyczących grup studenckich.
+"""
+from bs4 import BeautifulSoup
 from icalendar import Calendar
 import re
 
+from scraper.downloader import fetch_page, BASE_URL
 
 def parse_ics(content: str, grupa_id=None) -> list[dict]:
+    """Parsuje plik ICS i wydobywa wydarzenia."""
     events = []
     cal = Calendar.from_ical(content)
 
@@ -153,3 +159,72 @@ def parse_ics(content: str, grupa_id=None) -> list[dict]:
         events.append(event_data)
 
     return events
+
+def fetch_grupa_semestr(url: str) -> str:
+    """Pobiera informację o semestrze z podstrony grupy."""
+    html = fetch_page(url)
+    if not html:
+        return "nieznany"
+
+    soup = BeautifulSoup(html, "html.parser")
+    h3_tag = soup.find('h3')
+
+    if h3_tag and h3_tag.text:
+        text = h3_tag.text.lower()
+        if "semestr letni" in text:
+            return "letni"
+        elif "semestr zimowy" in text:
+            return "zimowy"
+
+    return "nieznany"
+
+def parse_grupy(html: str, kierunek: str, wydzial: str, kierunek_id: int = None) -> list[dict]:
+    """Parsuje HTML strony kierunku i wydobywa grupy."""
+    soup = BeautifulSoup(html, "html.parser")
+    wynik = []
+
+    grupy_items = soup.find_all("tr", class_=["odd", "even"])
+    if not grupy_items:
+        print(f"❌ Nie znaleziono grup dla kierunku: {kierunek}")
+        return wynik
+
+    for item in grupy_items:
+        a_tag = item.find("a")
+        if a_tag:
+            pelna_nazwa = a_tag.get_text(strip=True)
+
+            # Pobranie pełnego kodu grupy (przed pierwszym "/")
+            kod_grupy = pelna_nazwa.split("/")[0].strip() if "/" in pelna_nazwa else pelna_nazwa.strip()
+
+            # Wyodrębnij tryb studiów (część między / /)
+            tryb_studiow = "nieznany"
+            if "/" in pelna_nazwa:
+                parts = pelna_nazwa.split("/")
+                if len(parts) > 1:
+                    tryb_studiow = parts[1].strip()
+
+            link_grupy = BASE_URL + a_tag["href"]
+            grupa_id = a_tag["href"].split("ID=")[1].split("&")[0] if "ID=" in a_tag["href"] else None
+            link_grupy_ics = link_grupy.replace("grupy_plan.php?ID=", "grupy_ics.php?ID=") + "&KIND=GG"
+
+            # Pobierz semestr ze strony grupy
+            semestr = fetch_grupa_semestr(link_grupy)
+
+            grupa_data = {
+                "kod_grupy": kod_grupy,
+                "tryb_studiow": tryb_studiow,
+                "kierunek": kierunek,
+                "wydzial": wydzial,
+                "link_grupy": link_grupy,
+                "link_ics_grupy": link_grupy_ics,
+                "semestr": semestr,
+                "grupa_id": grupa_id
+            }
+
+            if kierunek_id:
+                grupa_data["kierunek_id"] = kierunek_id
+
+            wynik.append(grupa_data)
+            print(f"📌 Dodano grupę: {kod_grupy} ({kierunek})")
+
+    return wynik

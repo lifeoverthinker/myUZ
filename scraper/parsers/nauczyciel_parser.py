@@ -102,8 +102,16 @@
 
 import requests
 from bs4 import BeautifulSoup
+import concurrent.futures
+from functools import lru_cache
 
 BASE_URL = "https://plan.uz.zgora.pl/"
+
+
+@lru_cache(maxsize=500)
+def fetch_page_cached(url: str) -> str:
+    """Cachowana wersja fetch_page dla zwiększenia wydajności."""
+    return fetch_page(url)
 
 
 def fetch_page(url: str) -> str:
@@ -208,38 +216,60 @@ def fetch_and_parse_nauczyciel(nauczyciel_data: dict) -> dict:
     return {**nauczyciel_data, **szczegoly}
 
 
-def scrape_nauczyciele_from_grupy(grupy: list[dict]) -> list[dict]:
-    """Scrapuje nauczycieli z planów zajęć podanych grup."""
+def pobierz_nauczycieli_z_grupy(link_grupy: str, grupa_id):
+    """Pomocnicza funkcja do pobierania nauczycieli z jednej grupy."""
+    html = fetch_page_cached(link_grupy)
+    if not html:
+        return []
+    return parse_nauczyciele_from_group_page(html, grupa_id)
+
+
+def scrape_nauczyciele_from_grupy(grupy: list[dict], max_workers=10) -> list[dict]:
+    """Scrapuje nauczycieli z planów zajęć podanych grup równolegle."""
     wszystkie_linki_nauczycieli = []
     wszyscy_nauczyciele = []
+    znalezieni_nauczyciele_id = set()
 
-    # Zbiór do przechowywania już znalezionych nauczycieli
-    znalezieni_nauczyciele = set()
+    # 1. Równoległe pobieranie linków nauczycieli
+    print(f"🧑‍🏫 Pobieram linki nauczycieli dla {len(grupy)} grup równolegle...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        zadania = {}
+        for grupa in grupy:
+            kod_grupy = grupa['kod_grupy']
+            link_grupy = grupa['link_grupy']  # Poprawiona nazwa klucza
+            grupa_id = grupa.get('grupa_id') or grupa.get('id')
+            zadania[executor.submit(pobierz_nauczycieli_z_grupy, link_grupy, grupa_id)] = kod_grupy
 
-    for i, grupa in enumerate(grupy):
-        kod_grupy = grupa['kod_grupy']
-        link_grupy = grupa['link_strona_grupy']  # Link do planu zajęć w HTML
-        grupa_id = grupa.get('grupa_id') or grupa.get('id')
-
-        print(f"\n🔎 [{i + 1}/{len(grupy)}] Pobieram nauczycieli dla grupy: {kod_grupy}")
-        html = fetch_page(link_grupy)
-
-        if html:
-            nauczyciele = parse_nauczyciele_from_group_page(html, grupa_id)
-            wszystkie_linki_nauczycieli.extend(nauczyciele)
-            print(f"✅ Znaleziono {len(nauczyciele)} nauczycieli w grupie {kod_grupy}")
+        for zadanie in concurrent.futures.as_completed(zadania):
+            kod_grupy = zadania[zadanie]
+            try:
+                nauczyciele = zadanie.result()
+                wszystkie_linki_nauczycieli.extend(nauczyciele)
+                print(f"✅ Znaleziono {len(nauczyciele)} nauczycieli w grupie {kod_grupy}")
+            except Exception as e:
+                print(f"❌ Błąd pobierania nauczycieli dla grupy {kod_grupy}: {str(e)}")
 
     print(f"\n🔍 Znaleziono {len(wszystkie_linki_nauczycieli)} łącznie nauczycieli, pobieram szczegóły...")
 
-    # Pobierz szczegóły każdego nauczyciela
-    for i, n in enumerate(wszystkie_linki_nauczycieli):
-        # Sprawdź czy nauczyciel jest już w zbiorze znalezionych
-        if n["nauczyciel_id"] not in znalezieni_nauczyciele:
-            znalezieni_nauczyciele.add(n["nauczyciel_id"])
+    # 2. Równoległe pobieranie szczegółów nauczycieli
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        zadania = []
 
-            print(f"🧪 [{i + 1}/{len(wszystkie_linki_nauczycieli)}] Pobieram szczegóły nauczyciela: {n['nazwa']}")
-            nauczyciel_z_szczegolami = fetch_and_parse_nauczyciel(n)
-            wszyscy_nauczyciele.append(nauczyciel_z_szczegolami)
+        for n in wszystkie_linki_nauczycieli:
+            if n["nauczyciel_id"] not in znalezieni_nauczyciele_id:
+                znalezieni_nauczyciele_id.add(n["nauczyciel_id"])
+                zadania.append(executor.submit(fetch_and_parse_nauczyciel, n))
+
+        ukonczone = 0
+        for zadanie in concurrent.futures.as_completed(zadania):
+            try:
+                nauczyciel = zadanie.result()
+                wszyscy_nauczyciele.append(nauczyciel)
+                ukonczone += 1
+                if ukonczone % 10 == 0:
+                    print(f"🧪 Pobrano {ukonczone}/{len(zadania)} szczegółów nauczycieli...")
+            except Exception as e:
+                print(f"❌ Błąd pobierania szczegółów nauczyciela: {str(e)}")
 
     return wszyscy_nauczyciele
 
