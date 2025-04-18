@@ -199,9 +199,8 @@ def parse_grupy(html: str, kierunek: str, wydzial: str, kierunek_id: int = None)
         if a_tag:
             pelna_nazwa = a_tag.get_text(strip=True)
 
-            # Wyodrębnij tylko kod grupy - część przed pierwszą spacją
-            kod_grupy_parts = pelna_nazwa.split(' ', 1)
-            kod_grupy = kod_grupy_parts[0].strip()
+            # Zachowaj pełny kod grupy
+            kod_grupy = pelna_nazwa.strip()
 
             # Sprawdzamy, czy kod grupy nie jest za długi
             if len(kod_grupy) > 20:
