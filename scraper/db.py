@@ -238,7 +238,7 @@ def update_nauczyciele(grupy=None):
                     'imie_nazwisko': nauczyciel.get('imie_nazwisko', ''),
                     'instytut': nauczyciel.get('instytut', ''),
                     'email': email,
-                    'link_plan_nauczyciela': nauczyciel.get('link_ics', '')  # BŁĄD w nazwie kolumny
+                    'link_plan_nauczyciela': nauczyciel.get('link_ics', '')  # Poprawna nazwa kolumny
                 })
 
                 # Zapisz relację poprzez tabelę zajęcia
@@ -290,8 +290,18 @@ def update_grupy(kierunki, upsert=True):
             id_kierunku = kierunek.get('id')
             wydzial = kierunek.get('wydzial', 'Nieznany wydział')
 
-            if not id_kierunku or not link_kierunku or link_kierunku == 'None':
+            # Rozszerzona walidacja linku
+            if not id_kierunku:
+                print(f"⚠️ Brak ID dla kierunku: {nazwa_kierunku}")
+                continue
+
+            if not link_kierunku or link_kierunku == 'None' or link_kierunku is None:
                 print(f"⚠️ Brak poprawnego linku dla kierunku: {nazwa_kierunku}")
+                continue
+
+            # Sprawdzenie czy link ma poprawny format URL
+            if not isinstance(link_kierunku, str) or not link_kierunku.startswith(('http://', 'https://')):
+                print(f"⚠️ Nieprawidłowy format linku dla kierunku: {nazwa_kierunku} - {link_kierunku}")
                 continue
 
             print(f"🔍 Pobieram grupy dla kierunku: {nazwa_kierunku}")
