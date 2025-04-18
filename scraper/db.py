@@ -116,9 +116,9 @@ def save_events(events: list[dict], source_type: str) -> None:
                 'opis': event.get('description', ''),
                 'lokalizacja': event.get('location', ''),
                 'data_start': event.get('start', ''),
-                'data_koniec': event.get('end', ''),
+                'data_end': event.get('end', ''),  # Zmieniono z 'data_koniec' na 'data_end'
                 'uid': event.get('uid', ''),
-                'link_ics_zrodlowy': event.get('link_ics', '')  # Zmieniona nazwa kolumny
+                'link_ics_zrodlowy': event.get('link_ics', '')
             }
 
             # Dodaj klucz obcy w zależności od typu źródła
@@ -344,6 +344,10 @@ def update_grupy(kierunki, upsert=True):
             if isinstance(grupa.get('link_grupy'), str) and len(grupa['link_grupy']) > 255:
                 grupa['link_grupy'] = grupa['link_grupy'][:252] + "..."
                 print(f"⚠️ Skrócono link_grupy dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
+
+            if isinstance(grupa.get('semestr'), str) and len(grupa['semestr']) > 255:
+                grupa['semestr'] = grupa['semestr'][:252] + "..."
+                print(f"⚠️ Skrócono semestr dla grupy {grupa.get('kod_grupy', 'bez kodu')}")
 
             link_ics = grupa.get('link_ics_grupy')
 

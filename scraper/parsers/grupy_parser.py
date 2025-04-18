@@ -160,6 +160,7 @@ def parse_ics(content: str, grupa_id=None) -> list[dict]:
 
     return events
 
+
 def fetch_grupa_semestr(url: str) -> str:
     """Pobiera informację o semestrze z podstrony grupy."""
     html = fetch_page(url)
@@ -171,10 +172,23 @@ def fetch_grupa_semestr(url: str) -> str:
 
     if h3_tag and h3_tag.text:
         text = h3_tag.text.lower()
+
+        # Wyciągnij typ semestru (letni/zimowy) i rok akademicki
+        semester_match = re.search(r'semestr\s+(letni|zimowy)\s+(\d{4}/\d{4})', text)
+        if semester_match:
+            semester_type = semester_match.group(1)  # letni lub zimowy
+            academic_year = semester_match.group(2)  # np. 2024/2025
+            return f"{semester_type} {academic_year}"
+
+        # Jeśli nie ma dopasowania poprzez regex, użyj prostszej metody
         if "semestr letni" in text:
-            return "letni"
+            year_match = re.search(r'(\d{4}/\d{4})', text)
+            year = year_match.group(1) if year_match else ""
+            return f"letni {year}".strip()
         elif "semestr zimowy" in text:
-            return "zimowy"
+            year_match = re.search(r'(\d{4}/\d{4})', text)
+            year = year_match.group(1) if year_match else ""
+            return f"zimowy {year}".strip()
 
     return "nieznany"
 
