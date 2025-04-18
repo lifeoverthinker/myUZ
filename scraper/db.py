@@ -286,7 +286,12 @@ def update_grupy(kierunki, upsert=True):
 
         for kierunek in kierunki:
             nazwa_kierunku = kierunek.get('nazwa_kierunku')
-            link_kierunku = kierunek.get('link_strony_kierunku') or kierunek.get('link_kierunku')  # obsługa obu nazw
+            # Poprawione pobieranie linku - najpierw sprawdza link_strony_kierunku (z bazy)
+            link_kierunku = kierunek.get('link_strony_kierunku')
+            # Jeśli nie ma, szuka link_kierunku (ze scrapera)
+            if not link_kierunku:
+                link_kierunku = kierunek.get('link_kierunku')
+
             id_kierunku = kierunek.get('id')
             wydzial = kierunek.get('wydzial', 'Nieznany wydział')
 
@@ -299,12 +304,19 @@ def update_grupy(kierunki, upsert=True):
                 print(f"⚠️ Brak poprawnego linku dla kierunku: {nazwa_kierunku}")
                 continue
 
-            # Sprawdzenie czy link ma poprawny format URL
-            if not isinstance(link_kierunku, str) or not link_kierunku.startswith(('http://', 'https://')):
-                print(f"⚠️ Nieprawidłowy format linku dla kierunku: {nazwa_kierunku} - {link_kierunku}")
+            # Sprawdzenie i naprawa formatu linku
+            if not isinstance(link_kierunku, str):
+                print(f"⚠️ Link nie jest tekstem: {nazwa_kierunku} - {type(link_kierunku)}")
                 continue
 
+            if not link_kierunku.startswith(('http://', 'https://')):
+                # Próba naprawy URL przez dodanie protokołu
+                print(f"⚠️ Naprawiam URL dla kierunku {nazwa_kierunku}: {link_kierunku}")
+                link_kierunku = 'https://' + link_kierunku.lstrip('/')
+
             print(f"🔍 Pobieram grupy dla kierunku: {nazwa_kierunku}")
+            print(f"🔗 Link kierunku: {link_kierunku}")
+
             kierunek_obj = {
                 'id': id_kierunku,
                 'nazwa_kierunku': nazwa_kierunku,
@@ -315,9 +327,11 @@ def update_grupy(kierunki, upsert=True):
             grupy = scrape_grupy_for_kierunki([kierunek_obj])
 
             if not grupy:
+                print(f"❌ Brak grup dla kierunku: {nazwa_kierunku}")
                 continue
 
             if not isinstance(grupy, list):
+                print(f"❌ Nieprawidłowy format danych grup dla {nazwa_kierunku}")
                 continue
 
             valid_grupy = []
