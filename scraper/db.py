@@ -54,6 +54,7 @@ def _utworz_powiazania_zajecia(zajecia_data, events):
     except Exception as e:
         print(f"⚠️ Błąd podczas tworzenia powiązań zajęć: {e}")
 
+
 def save_kierunki(kierunki):
     """Zapisuje kierunki do bazy danych metodą wsadową."""
     if not kierunki:
@@ -87,6 +88,7 @@ def save_kierunki(kierunki):
     except Exception as e:
         print(f"❌ Błąd podczas zapisywania kierunków: {e}")
         return []
+
 
 def save_nauczyciele(nauczyciele):
     """Zapisuje nauczycieli do bazy danych metodą wsadową."""
@@ -133,10 +135,15 @@ def save_nauczyciele(nauczyciele):
         return []
 
 
-def save_events(events: list[dict]) -> None:
+def save_events(events, source_type=None):
     """Zapisuje wydarzenia (zajęcia) do bazy danych."""
     if not events:
         return
+
+    # Dodanie typu źródła do każdego wydarzenia
+    if source_type:
+        for event in events:
+            event['source_type'] = source_type
 
     try:
         # Przygotuj dane do wsadowego dodania
@@ -175,6 +182,7 @@ def save_events(events: list[dict]) -> None:
         print(f"❌ Błąd podczas zapisywania wydarzeń: {e}")
         import traceback
         traceback.print_exc()
+
 
 def update_kierunki(upsert=True):
     """Aktualizuje kierunki z funkcją upsert."""
@@ -232,6 +240,7 @@ def update_kierunki(upsert=True):
     except Exception as e:
         print(f"❌ Błąd podczas aktualizacji kierunków: {e}")
         return []
+
 
 def update_nauczyciele(grupy=None):
     """Aktualizuje nauczycieli z funkcją upsert."""
@@ -295,8 +304,8 @@ def update_nauczyciele(grupy=None):
             if insert_result.data:
                 for i, data in enumerate(insert_result.data):
                     nauczyciel = next((n for n in nauczyciele if
-                        (n.get('email') not in email_map) and
-                        (n.get('imie_nazwisko') not in nazwa_map)), None)
+                                       (n.get('email') not in email_map) and
+                                       (n.get('imie_nazwisko') not in nazwa_map)), None)
                     if nauczyciel:
                         nauczyciel['id'] = data['id']
 
@@ -316,6 +325,7 @@ def update_nauczyciele(grupy=None):
     except Exception as e:
         print(f"❌ Błąd podczas aktualizacji nauczycieli: {e}")
         return []
+
 
 def update_grupy(kierunki, upsert=True):
     """Aktualizuje grupy dla podanych kierunków."""
@@ -425,7 +435,8 @@ def update_grupy(kierunki, upsert=True):
             if insert_result.data:
                 for i, data in enumerate(insert_result.data):
                     if i < len(wszystkie_grupy):
-                        if 'link_ics_grupy' in wszystkie_grupy[i] and wszystkie_grupy[i]['link_ics_grupy'] not in existing_map:
+                        if 'link_ics_grupy' in wszystkie_grupy[i] and wszystkie_grupy[i][
+                            'link_ics_grupy'] not in existing_map:
                             wszystkie_grupy[i]['id'] = data['id']
 
         # Aktualizuj istniejące rekordy

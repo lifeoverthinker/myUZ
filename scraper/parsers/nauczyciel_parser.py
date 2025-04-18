@@ -91,24 +91,11 @@ def parse_nauczyciel_details(html: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
     dane = {}
 
-    # Imię i nazwisko
+    # Imię i nazwisko jako jedna wartość
     name_tag = soup.find("h2", string=lambda s: s and "Plan zajęć" not in s)
     if name_tag:
-        pelne_imie = name_tag.get_text(strip=True)
-        dane["pelne_imie"] = pelne_imie
-
-        # Próba wyodrębnienia tytułu, imienia i nazwiska
-        parts = pelne_imie.split()
-        if len(parts) >= 2:
-            # Zakładamy, że ostatni element to nazwisko
-            dane["nazwisko"] = parts[-1]
-
-            # Jeśli jest więcej elementów, pierwszy może być imieniem lub tytułem
-            if len(parts) > 2:
-                dane["tytul"] = ' '.join(parts[:-2])
-                dane["imie"] = parts[-2]
-            else:
-                dane["imie"] = parts[0]
+        imie_nazwisko = name_tag.get_text(strip=True)
+        dane["imie_nazwisko"] = imie_nazwisko
 
     # Wydział/Instytut
     instytut_tag = soup.find("h3")
@@ -123,7 +110,7 @@ def parse_nauczyciel_details(html: str) -> dict:
     # Link do ICS
     ics_link = soup.find("a", href=lambda href: href and "nauczyciel_ics.php" in href)
     if ics_link:
-        dane["link_ics_nauczyciela"] = BASE_URL + ics_link["href"]
+        dane["link_plan_nauczyciela"] = BASE_URL + ics_link["href"]
 
     return dane
 
@@ -138,6 +125,9 @@ def fetch_and_parse_nauczyciel(nauczyciel_data: dict) -> dict:
         return nauczyciel_data
 
     szczegoly = parse_nauczyciel_details(html)
+
+    # Dodaj link do strony nauczyciela
+    nauczyciel_data["link_strony_nauczyciela"] = link
 
     # Połącz dane
     return {**nauczyciel_data, **szczegoly}
@@ -214,5 +204,5 @@ if __name__ == "__main__":
 
     print(f"\nPobrano {len(nauczyciele)} nauczycieli.")
     for n in nauczyciele:
-        sanitized_name = sanitize_string(n.get('pelne_imie', n.get('nazwa')))
+        sanitized_name = sanitize_string(n.get('imie_nazwisko', n.get('nazwa')))
         print(f"Nauczyciel: {sanitized_name}, Email: {n.get('email', 'brak')}")
