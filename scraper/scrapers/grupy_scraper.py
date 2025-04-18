@@ -34,11 +34,17 @@ from scraper.downloader import fetch_page, BASE_URL
 from scraper.parsers.grupy_parser import parse_grupy
 from scraper.ics_updater import aktualizuj_plany_grup
 
+
 def scrape_grupy_for_kierunki(kierunki: list) -> list[dict]:
     """Scrapuje grupy dla listy kierunków."""
     wszystkie_grupy = []
 
     for kierunek in kierunki:
+        # Sprawdź typ kierunku przed próbą dostępu do atrybutów
+        if isinstance(kierunek, str):
+            print(f"❌ Pominięto kierunek przekazany jako string: {kierunek}")
+            continue
+
         nazwa_kierunku = kierunek.get('nazwa_kierunku', 'Nieznany kierunek')
         wydzial = kierunek.get('wydzial', 'Nieznany wydział')
         kierunek_id = kierunek.get('kierunek_id')
@@ -53,7 +59,6 @@ def scrape_grupy_for_kierunki(kierunki: list) -> list[dict]:
 
     return wszystkie_grupy
 
-
 def pobierz_grupy_rownolegle(kierunki, max_workers=10):
     """Zoptymalizowana wersja z bezpośrednim przetwarzaniem kierunków."""
     wyniki = []
@@ -62,18 +67,27 @@ def pobierz_grupy_rownolegle(kierunki, max_workers=10):
         # Tworzenie zadań dla pojedynczych kierunków
         def przetwarzaj_kierunek(kierunek):
             try:
+                # Sprawdź typ kierunku przed próbą dostępu do atrybutów
+                if isinstance(kierunek, str):
+                    print(f"❌ Pominięto kierunek przekazany jako string: {kierunek}")
+                    return []
+
                 nazwa_kierunku = kierunek.get('nazwa_kierunku', 'Nieznany kierunek')
                 wydzial = kierunek.get('wydzial', 'Nieznany wydział')
                 kierunek_id = kierunek.get('kierunek_id')
                 link_kierunku = kierunek.get('link_kierunku')
 
+                print(f"🔍 Pobieram grupy dla kierunku: {nazwa_kierunku}")
                 html = fetch_page(link_kierunku)
                 if not html:
                     return []
 
-                return parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id)
+                grupy = parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id)
+                print(f"✅ Pobrano {len(grupy)} grup dla kierunku {nazwa_kierunku}")
+                return grupy
             except Exception as e:
-                print(f"❌ Błąd dla {kierunek.get('nazwa_kierunku', 'nieznanego kierunku')}: {e}")
+                nazwa = kierunek.get('nazwa_kierunku', 'nieznanego kierunku') if isinstance(kierunek, dict) else 'nieznanego kierunku'
+                print(f"❌ Błąd dla {nazwa}: {e}")
                 return []
 
         # Uruchomienie wszystkich zadań i zebranie wyników
@@ -86,7 +100,6 @@ def pobierz_grupy_rownolegle(kierunki, max_workers=10):
                 print(f"❌ Nieobsłużony błąd: {e}")
 
     return wyniki
-
 
 if __name__ == "__main__":
     # Dla samodzielnego testowania
