@@ -170,27 +170,34 @@ def fetch_grupa_semestr(url: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     h3_tag = soup.find('h3')
 
-    if h3_tag and h3_tag.text:
-        text = h3_tag.text.lower()
+    if not h3_tag or not h3_tag.text:
+        return "nieznany"
 
-        # Wyciągnij typ semestru (letni/zimowy) i rok akademicki
-        semester_match = re.search(r'semestr\s+(letni|zimowy)\s+(\d{4}/\d{4})', text)
-        if semester_match:
-            semester_type = semester_match.group(1)  # letni lub zimowy
-            academic_year = semester_match.group(2)  # np. 2024/2025
-            return f"{semester_type} {academic_year}"
+    text = h3_tag.text.lower()
 
-        # Jeśli nie ma dopasowania poprzez regex, użyj prostszej metody
-        if "semestr letni" in text:
-            year_match = re.search(r'(\d{4}/\d{4})', text)
-            year = year_match.group(1) if year_match else ""
-            return f"letni {year}".strip()
-        elif "semestr zimowy" in text:
-            year_match = re.search(r'(\d{4}/\d{4})', text)
-            year = year_match.group(1) if year_match else ""
-            return f"zimowy {year}".strip()
+    # Bardziej precyzyjny regex do wyciągania semestru i roku akademickiego
+    semester_match = re.search(r'semestr\s+(letni|zimowy)\s+(\d{4}/\d{4})', text)
+    if semester_match:
+        semester_type = semester_match.group(1)  # letni lub zimowy
+        academic_year = semester_match.group(2)  # np. 2024/2025
+        return f"{semester_type} {academic_year}"
+
+    # Jeśli nie znaleziono pełnego wzorca, szukaj oddzielnie
+    semester_type = None
+    if "semestr letni" in text:
+        semester_type = "letni"
+    elif "semestr zimowy" in text:
+        semester_type = "zimowy"
+
+    # Szukaj roku akademickiego w dowolnym miejscu tekstu
+    year_match = re.search(r'(\d{4}/\d{4})', text)
+    academic_year = year_match.group(1) if year_match else ""
+
+    if semester_type:
+        return f"{semester_type} {academic_year}".strip()
 
     return "nieznany"
+
 
 def parse_grupy(html: str, kierunek: str, wydzial: str, kierunek_id: int = None) -> list[dict]:
     """Parsuje HTML strony kierunku i wydobywa grupy."""
@@ -207,8 +214,9 @@ def parse_grupy(html: str, kierunek: str, wydzial: str, kierunek_id: int = None)
         if a_tag:
             pelna_nazwa = a_tag.get_text(strip=True)
 
-            # Pobranie pełnego kodu grupy (przed pierwszym "/")
-            kod_grupy = pelna_nazwa.split("/")[0].strip() if "/" in pelna_nazwa else pelna_nazwa.strip()
+            # Wyodrębnij tylko kod grupy - część przed pierwszą spacją
+            kod_grupy_parts = pelna_nazwa.split(' ', 1)
+            kod_grupy = kod_grupy_parts[0].strip()
 
             # Wyodrębnij tryb studiów (część między / /)
             tryb_studiow = "nieznany"
