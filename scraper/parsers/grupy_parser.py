@@ -119,27 +119,28 @@ def parse_ics(content: str, grupa_id=None) -> list[dict]:
         start = component.get("DTSTART").dt
         end = component.get("DTEND").dt
         location = component.get("LOCATION")
+        categories = component.get("CATEGORIES", "")  # Pobierz rodzaj zajęć z CATEGORIES
 
         # Domyślne wartości
         przedmiot = summary
-        rz = None
+        rz = categories if categories else None  # Użyj CATEGORIES jako rodzaj zajęć
         nauczyciel = None
         pg = "CAŁY KIERUNEK"
 
         # Szukamy głównego nawiasu z typem zajęć (Ć, W, K, etc.)
         match = re.search(r"\(([^():]+)\):\s+(.+)", summary)
         if match:
-            rz = match.group(1).strip()
-            nauczyciel = match.group(2).strip()
             przedmiot = summary[:match.start()].strip()
-        else:
-            przedmiot = summary.strip()
+            nauczyciel = match.group(2).strip()
 
         # Szukamy podgrupy PG w nawiasie, np. (PG: SN)
         pg_match = re.search(r"\(PG:\s*([^)]+)\)", summary)
         if pg_match:
             pg = pg_match.group(1).strip()
-            # usuwamy ten fragment z nauczyciela
+            # Ograniczenie długości podgrupy do 20 znaków
+            if len(pg) > 20:
+                pg = pg[:20]
+            # Usuwamy ten fragment z nauczyciela
             nauczyciel = re.sub(r"\(PG:.*?\)", "", nauczyciel).strip() if nauczyciel else None
 
         event_data = {
@@ -159,7 +160,6 @@ def parse_ics(content: str, grupa_id=None) -> list[dict]:
         events.append(event_data)
 
     return events
-
 
 def fetch_grupa_semestr(url: str) -> str:
     """Pobiera informację o semestrze z podstrony grupy."""
@@ -190,6 +190,14 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
     grupy = []
 
     try:
+        # Znajdź kod grupy z drugiego tagu H2
+        h2_tags = soup.find_all("h2")
+        kod_grupy_ogolny = None
+        if len(h2_tags) >= 2:  # Sprawdź czy istnieje drugi tag H2
+            kod_grupy_ogolny = h2_tags[1].text.strip()
+        else:
+            kod_grupy_ogolny = "nieznany"
+
         # Znajdź informację o semestrze i trybie studiów w nagłówku H3
         semestr = "nieznany"
         tryb_studiow_ogolny = "nieznany"
@@ -197,7 +205,7 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
         h3_tags = soup.find_all("h3")
         for h3 in h3_tags:
             text = h3.text.lower()
-            # Wykrywanie semestru
+            # Wykrywanie semestru - szukaj tylko słowa "letni" lub "zimowy"
             if "semestr letni" in text:
                 semestr = "letni"
             elif "semestr zimowy" in text:
@@ -214,13 +222,9 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
 
         for row in rows:
             link = row.get('href')
-            kod_grupy = row.text.strip()
 
-            if not link or not kod_grupy:
+            if not link:
                 continue
-
-            # Użyj trybu studiów z ogólnego nagłówka
-            tryb_studiow = tryb_studiow_ogolny
 
             # Przygotuj pełne URL do planu grupy
             full_link = f"{BASE_URL}{link}" if link and not link.startswith('http') else link
@@ -239,10 +243,10 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
             if grupa_id:
                 grupa = {
                     'grupa_id': grupa_id,
-                    'kod_grupy': kod_grupy,
+                    'kod_grupy': kod_grupy_ogolny,
                     'kierunek_id': kierunek_id,
                     'wydzial': wydzial,
-                    'tryb_studiow': tryb_studiow,
+                    'tryb_studiow': tryb_studiow_ogolny,
                     'semestr': semestr,
                     'link_grupy': full_link,
                     'link_ics_grupy': ics_link
