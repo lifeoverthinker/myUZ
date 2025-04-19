@@ -21,6 +21,7 @@ Moduł do pobierania informacji o grupach studenckich z planu UZ.
 import concurrent.futures
 import datetime
 from bs4 import BeautifulSoup
+from typing import List
 
 try:
     from tqdm import tqdm
@@ -31,10 +32,11 @@ except ImportError:
         return iterable
 
 from scraper.downloader import fetch_page, BASE_URL
-from scraper.parsers.grupy_parser import parse_grupy
+from scraper.models import Grupa, Kierunek
+from scraper.parsers.grupy_parser import parse_grupy as parse_grupy_parser
 from scraper.ics_updater import aktualizuj_plany_grup
 
-def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
+def parse_grupy_html(html, nazwa_kierunku, wydzial, kierunek_id) -> List[Grupa]:
     """Parsuje grupy z HTML."""
     soup = BeautifulSoup(html, 'html.parser')
     grupy = []
@@ -88,16 +90,16 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
             ics_link = f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG" if grupa_id else None
 
             if grupa_id:
-                grupa = {
-                    'grupa_id': grupa_id,
-                    'kod_grupy': kod_grupy,
-                    'kierunek_id': kierunek_id,
-                    'wydzial': wydzial,
-                    'tryb_studiow': tryb_studiow,
-                    'semestr': semestr,
-                    'link_grupy': full_link,
-                    'link_ics_grupy': ics_link
-                }
+                grupa = Grupa(
+                    grupa_id=grupa_id,
+                    kod_grupy=kod_grupy,
+                    kierunek_id=kierunek_id,
+                    wydzial=wydzial,
+                    tryb_studiow=tryb_studiow,
+                    semestr=semestr,
+                    link_grupy=full_link,
+                    link_ics_grupy=ics_link
+                )
                 grupy.append(grupa)
 
         return grupy
@@ -105,7 +107,7 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
         print(f"❌ Błąd parsowania grup: {e}")
         return []
 
-def scrape_grupy_for_kierunki(kierunki: list) -> list[dict]:
+def scrape_grupy_for_kierunki(kierunki: list) -> List[Grupa]:
     """Scrapuje grupy dla listy kierunków."""
     wszystkie_grupy = []
 
@@ -115,15 +117,22 @@ def scrape_grupy_for_kierunki(kierunki: list) -> list[dict]:
             print(f"❌ Pominięto kierunek przekazany jako string: {kierunek}")
             continue
 
-        nazwa_kierunku = kierunek.get('nazwa_kierunku', 'Nieznany kierunek')
-        wydzial = kierunek.get('wydzial', 'Nieznany wydział')
-        kierunek_id = kierunek.get('id')
-        link_kierunku = kierunek.get('link_kierunku') or kierunek.get('link_strony_kierunku')
+        # Obsługa zarówno obiektu Kierunek jak i słownika
+        if isinstance(kierunek, Kierunek):
+            nazwa_kierunku = kierunek.nazwa_kierunku
+            wydzial = kierunek.wydzial
+            kierunek_id = kierunek.kierunek_id
+            link_kierunku = kierunek.link_strony_kierunku
+        else:
+            nazwa_kierunku = kierunek.get('nazwa_kierunku', 'Nieznany kierunek')
+            wydzial = kierunek.get('wydzial', 'Nieznany wydział')
+            kierunek_id = kierunek.get('id') or kierunek.get('kierunek_id')
+            link_kierunku = kierunek.get('link_kierunku') or kierunek.get('link_strony_kierunku')
 
         print(f"\n🔍 Pobieram grupy dla kierunku: {nazwa_kierunku}")
         html = fetch_page(link_kierunku)
         if html:
-            grupy = parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id)
+            grupy = parse_grupy_html(html, nazwa_kierunku, wydzial, kierunek_id)
             wszystkie_grupy.extend(grupy)
             print(f"✅ Pobrano {len(grupy)} grup dla kierunku {nazwa_kierunku}")
 

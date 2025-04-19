@@ -5,7 +5,7 @@ import os
 from supabase import create_client
 from scraper.scrapers.kierunki_scraper import scrape_kierunki
 from scraper.scrapers.grupy_scraper import scrape_grupy_for_kierunki
-from scraper.parsers.nauczyciel_parser import scrape_nauczyciele_from_grupy
+from scraper.scrapers.nauczyciel_scraper import scrape_nauczyciele_from_grupy
 import datetime
 
 load_dotenv()
@@ -13,7 +13,6 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-
 
 def _utworz_powiazanie_nauczyciel_grupa(nauczyciel_id, grupa_id):
     """Tworzy powiązanie nauczyciel-grupa poprzez tabelę nauczyciele_grupy."""

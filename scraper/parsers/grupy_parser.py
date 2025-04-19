@@ -100,13 +100,17 @@
 """
 Moduł do parsowania danych dotyczących grup studenckich.
 """
-from bs4 import BeautifulSoup
+
 from icalendar import Calendar
 import re
+from scraper.models import Grupa, Zajecia
+from bs4 import BeautifulSoup
+from typing import List
 
 from scraper.downloader import fetch_page, BASE_URL
 
-def parse_ics(content: str, grupa_id=None) -> list[dict]:
+
+def parse_ics(content: str, grupa_id=None) -> List[Zajecia]:
     """Parsuje plik ICS i wydobywa wydarzenia."""
     events = []
     cal = Calendar.from_ical(content)
@@ -127,7 +131,7 @@ def parse_ics(content: str, grupa_id=None) -> list[dict]:
         nauczyciel = None
         pg = "CAŁY KIERUNEK"
 
-        # Szukamy głównego nawiasu z typem zajęć (Ć, W, K, etc.)
+        # Szukamy głównego nawiasu z typem zajęć (Ć, W, K, etc.) i nauczyciela
         match = re.search(r"\(([^():]+)\):\s+(.+)", summary)
         if match:
             przedmiot = summary[:match.start()].strip()
@@ -143,23 +147,22 @@ def parse_ics(content: str, grupa_id=None) -> list[dict]:
             # Usuwamy ten fragment z nauczyciela
             nauczyciel = re.sub(r"\(PG:.*?\)", "", nauczyciel).strip() if nauczyciel else None
 
-        event_data = {
-            "przedmiot": przedmiot,
-            "rz": rz,
-            "nauczyciel": nauczyciel,
-            "pg": pg,
-            "od": start,
-            "do_": end,
-            "miejsce": location
-        }
+        # Tworzenie obiektu Zajecia zamiast słownika
+        zajecia = Zajecia(
+            grupa_id=grupa_id,
+            przedmiot=przedmiot,
+            rz=rz,
+            nauczyciel=nauczyciel,
+            pg=pg,
+            od=start,
+            do_=end,
+            miejsce=location
+        )
 
-        # Dodaj grupa_id jeśli podano
-        if grupa_id is not None:
-            event_data["grupa_id"] = grupa_id
-
-        events.append(event_data)
+        events.append(zajecia)
 
     return events
+
 
 def fetch_grupa_semestr(url: str) -> str:
     """Pobiera informację o semestrze z podstrony grupy."""
@@ -184,7 +187,7 @@ def fetch_grupa_semestr(url: str) -> str:
     return "nieznany"
 
 
-def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
+def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id) -> List[Grupa]:
     """Parsuje grupy z HTML."""
     soup = BeautifulSoup(html, 'html.parser')
     grupy = []
@@ -193,7 +196,7 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
         # Znajdź kod grupy z drugiego tagu H2
         h2_tags = soup.find_all("h2")
         kod_grupy_ogolny = None
-        if len(h2_tags) >= 2:  # Sprawdź czy istnieje drugi tag H2
+        if len(h2_tags) >= 2:
             kod_grupy_ogolny = h2_tags[1].text.strip()
         else:
             kod_grupy_ogolny = "nieznany"
@@ -205,7 +208,7 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
         h3_tags = soup.find_all("h3")
         for h3 in h3_tags:
             text = h3.text.lower()
-            # Wykrywanie semestru - szukaj tylko słowa "letni" lub "zimowy"
+            # Wykrywanie semestru
             if "semestr letni" in text:
                 semestr = "letni"
             elif "semestr zimowy" in text:
@@ -241,16 +244,16 @@ def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
             ics_link = f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG" if grupa_id else None
 
             if grupa_id:
-                grupa = {
-                    'grupa_id': grupa_id,
-                    'kod_grupy': kod_grupy_ogolny,
-                    'kierunek_id': kierunek_id,
-                    'wydzial': wydzial,
-                    'tryb_studiow': tryb_studiow_ogolny,
-                    'semestr': semestr,
-                    'link_grupy': full_link,
-                    'link_ics_grupy': ics_link
-                }
+                grupa = Grupa(
+                    grupa_id=grupa_id,
+                    kod_grupy=kod_grupy_ogolny,
+                    kierunek_id=kierunek_id,
+                    wydzial=wydzial,
+                    tryb_studiow=tryb_studiow_ogolny,
+                    semestr=semestr,
+                    link_grupy=full_link,
+                    link_ics_grupy=ics_link
+                )
                 grupy.append(grupa)
 
         return grupy

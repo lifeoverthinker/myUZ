@@ -1,36 +1,56 @@
+"""
+Moduł do pobierania i aktualizacji planów zajęć w formacie ICS.
+"""
+import concurrent.futures
+import datetime
+from tqdm import tqdm
+
+from scraper.downloader import BASE_URL, download_ics
+
+
 def pobierz_plan_ics_grupy(grupa_id):
     """Pobiera plan grupy w formacie ICS."""
     ics_link = f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG"
 
     try:
-        response = requests.get(ics_link)
-        response.raise_for_status()
+        ics_data = download_ics(ics_link)
         return {
             'grupa_id': grupa_id,
-            'ics_data': response.text,
+            'ics_data': ics_data,
             'aktualizacja_data': datetime.datetime.now().isoformat()
         }
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         print(f"❌ Błąd pobierania planu ICS dla grupy {grupa_id}: {e}")
         return None
+
 
 def pobierz_plan_ics_nauczyciela(nauczyciel_id):
     """Pobiera plan nauczyciela w formacie ICS."""
     ics_link = f"{BASE_URL}nauczyciel_ics.php?ID={nauczyciel_id}&KIND=GG"
 
     try:
-        response = requests.get(ics_link)
-        response.raise_for_status()
+        ics_data = download_ics(ics_link)
         return {
             'nauczyciel_id': nauczyciel_id,
-            'ics_data': response.text,
+            'ics_data': ics_data,
             'aktualizacja_data': datetime.datetime.now().isoformat()
         }
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         print(f"❌ Błąd pobierania planu ICS dla nauczyciela {nauczyciel_id}: {e}")
         return None
 
+
 def aktualizuj_plany_grup(grupa_ids, max_workers=10):
+    """
+    Aktualizuje plany grup bezpośrednio poprzez pobranie plików ICS.
+
+    Args:
+        grupa_ids: Lista identyfikatorów grup do aktualizacji
+        max_workers: Liczba równoległych wątków
+
+    Returns:
+        Lista słowników z danymi ics dla każdej grupy
+    """
     aktualizowane_plany = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -49,6 +69,7 @@ def aktualizuj_plany_grup(grupa_ids, max_workers=10):
                 print(f"❌ Błąd dla grupy {grupa_id}: {e}")
 
     return aktualizowane_plany
+
 
 def aktualizuj_plany_nauczycieli(nauczyciel_ids, max_workers=10) -> list[dict]:
     """

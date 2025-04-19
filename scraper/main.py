@@ -1,9 +1,18 @@
+"""
+Główny moduł scrapera pobierającego dane z planu Uniwersytetu Zielonogórskiego.
+Zbiera informacje o kierunkach, grupach, nauczycielach i zajęciach.
+"""
+
 from dotenv import load_dotenv
 import os
+import concurrent.futures
 from supabase import create_client
+from tqdm import tqdm
+
 from scraper.downloader import download_ics
 from scraper.parsers.grupy_parser import parse_ics
 from scraper.db import save_events, update_kierunki, update_grupy, update_nauczyciele
+from scraper.ics_updater import aktualizuj_plany_grup, aktualizuj_plany_nauczycieli
 
 load_dotenv()
 
@@ -13,6 +22,9 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
 def main():
+    """Główna funkcja scrapera, która sekwencyjnie pobiera dane o kierunkach, grupach,
+    nauczycielach i planach zajęć, a następnie zapisuje je do bazy danych."""
+
     print("🔄 Scraper startuje...")
 
     try:
@@ -41,59 +53,54 @@ def main():
         else:
             print(f"✅ Pobrano i zapisano {len(nauczyciele)} nauczycieli")
 
-        # 4. Scrapuj plany z plików ICS
+        # 4. Scrapuj plany z plików ICS (równolegle)
         print("\n📅 ETAP 4: Pobieranie planów zajęć...")
 
-        # Optymalizacja: przygotuj zbiorcze listy wydarzeń
+        # Przygotowanie list identyfikatorów
+        grupa_ids = [grupa['id'] for grupa in grupy if 'id' in grupa]
+
+        # Pobieranie planów grup równolegle
+        print(f"🔄 Pobieram plany dla {len(grupa_ids)} grup...")
+        plany_grup = aktualizuj_plany_grup(grupa_ids)
+
+        # Parsowanie i zapisywanie wydarzeń z planów grup
         grupa_events = []
-        nauczyciel_events = []
+        for plan in tqdm(plany_grup, desc="Parsowanie planów grup"):
+            try:
+                events = parse_ics(plan['ics_data'], grupa_id=plan['grupa_id'])
+                grupa_events.extend(events)
+            except Exception as e:
+                print(f"❌ Błąd parsowania planu grupy {plan['grupa_id']}: {e}")
 
-        # Najpierw plany grup
-        grupy_count = 0
-        for grupa in grupy:
-            # Sprawdzamy dostępność linku ICS w nowej strukturze
-            ics_link = grupa.get('link_ics_grupy')
-
-            if ics_link and 'id' in grupa:
-                print(f"📥 Pobieram plan dla grupy {grupa['kod_grupy']}...")
-                try:
-                    ics_data = download_ics(ics_link)
-                    events = parse_ics(ics_data, grupa_id=grupa['id'])
-                    grupa_events.extend(events)
-                    grupy_count += 1
-                except Exception as e:
-                    print(f"❌ Błąd podczas pobierania planu grupy {grupa['kod_grupy']}: {e}")
-
-        # Zapisz zbiorczo wydarzenia grup
         if grupa_events:
             save_events(grupa_events, "grupa")
-            print(f"✅ Zapisano plany dla {grupy_count} grup ({len(grupa_events)} wydarzeń)")
+            print(f"✅ Zapisano plany dla {len(plany_grup)} grup ({len(grupa_events)} wydarzeń)")
 
-        # Potem plany nauczycieli
-        naucz_count = 0
+        # Pobieranie planów nauczycieli równolegle
         if nauczyciele:
-            for nauczyciel in nauczyciele:
-                # Zaktualizowana nazwa kolumny - popraw na link_plan_nauczyciela
-                ics_link = nauczyciel.get('link_plan_nauczyciela')
+            nauczyciel_ids = [n['id'] for n in nauczyciele if 'id' in n]
+            print(f"🔄 Pobieram plany dla {len(nauczyciel_ids)} nauczycieli...")
+            plany_nauczycieli = aktualizuj_plany_nauczycieli(nauczyciel_ids)
 
-                if ics_link and 'id' in nauczyciel:
-                    print(f"📥 Pobieram plan dla nauczyciela {nauczyciel.get('imie_nazwisko', 'bez nazwiska')}...")
-                    try:
-                        ics_data = download_ics(ics_link)
-                        events = parse_ics(ics_data, nauczyciel_id=nauczyciel['id'])
-                        nauczyciel_events.extend(events)
-                        naucz_count += 1
-                    except Exception as e:
-                        print(
-                            f"❌ Błąd pobierania planu nauczyciela {nauczyciel.get('imie_nazwisko', 'bez nazwiska')}: {e}")            # Zapisz zbiorczo wydarzenia nauczycieli
+            # Parsowanie i zapisywanie wydarzeń z planów nauczycieli
+            nauczyciel_events = []
+            for plan in tqdm(plany_nauczycieli, desc="Parsowanie planów nauczycieli"):
+                try:
+                    events = parse_ics(plan['ics_data'], nauczyciel_id=plan['nauczyciel_id'])
+                    nauczyciel_events.extend(events)
+                except Exception as e:
+                    print(f"❌ Błąd parsowania planu nauczyciela {plan['nauczyciel_id']}: {e}")
+
             if nauczyciel_events:
                 save_events(nauczyciel_events, "nauczyciel")
-                print(f"✅ Zapisano plany dla {naucz_count} nauczycieli ({len(nauczyciel_events)} wydarzeń)")
+                print(f"✅ Zapisano plany dla {len(plany_nauczycieli)} nauczycieli ({len(nauczyciel_events)} wydarzeń)")
 
         print("\n✅ Zakończono cały proces scrapowania i zapisu do bazy danych.")
 
     except Exception as e:
         print(f"\n❌ Nieoczekiwany błąd podczas wykonywania scrapera: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

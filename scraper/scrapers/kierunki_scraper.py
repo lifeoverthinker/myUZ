@@ -1,5 +1,11 @@
+"""
+Moduł do pobierania informacji o kierunkach studiów z planu UZ.
+"""
 import requests
 from bs4 import BeautifulSoup
+from typing import List
+
+from scraper.models import Kierunek
 
 BASE_URL = "https://plan.uz.zgora.pl/"
 
@@ -15,7 +21,7 @@ def fetch_page(url: str) -> str:
         return ""
 
 
-def parse_departments_and_courses(html: str) -> list[dict]:
+def parse_departments_and_courses(html: str) -> List[Kierunek]:
     """
     Parsuje HTML i wyodrębnia wydziały oraz kierunki.
     """
@@ -47,22 +53,33 @@ def parse_departments_and_courses(html: str) -> list[dict]:
         # Jeśli to kierunek i mamy aktywny wydział
         elif item.find("a") and wydzial:
             a_tag = item.find("a")
-            kierunek = a_tag.get_text(strip=True)
+            nazwa_kierunku = a_tag.get_text(strip=True)
             link = BASE_URL + a_tag["href"]
 
             # Pomiń studia podyplomowe
-            if "Studia podyplomowe" not in kierunek:
-                wynik.append({
-                    "wydzial": wydzial,
-                    "nazwa_kierunku": kierunek,
-                    "link_kierunku": link
-                })
-                print(f"📌 Dodano kierunek: {kierunek}")
+            if "Studia podyplomowe" not in nazwa_kierunku:
+                # Wydobycie ID kierunku z linku
+                kierunek_id = None
+                if "ID=" in link:
+                    try:
+                        kierunek_id = link.split("ID=")[1].split("&")[0]
+                    except (IndexError, ValueError):
+                        kierunek_id = None
+
+                if kierunek_id:
+                    kierunek = Kierunek(
+                        kierunek_id=kierunek_id,
+                        nazwa=nazwa_kierunku,
+                        wydzial=wydzial,
+                        link=link
+                    )
+                    wynik.append(kierunek)
+                    print(f"📌 Dodano kierunek: {nazwa_kierunku}")
 
     return wynik
 
 
-def scrape_kierunki() -> list[dict]:
+def scrape_kierunki() -> List[Kierunek]:
     """Scrapuje kierunki i wydziały."""
     url = BASE_URL + "grupy_lista_kierunkow.php"
     print(f"🔍 Pobieram dane z: {url}")
