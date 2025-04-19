@@ -34,6 +34,11 @@ def main():
         if not kierunki:
             print("❌ Nie udało się pobrać kierunków. Przerywanie.")
             return
+
+        # Konwersja obiektów Kierunek do słowników jeśli to konieczne
+        if kierunki and hasattr(kierunki[0], '__dict__'):
+            kierunki = [k.__dict__ for k in kierunki]
+
         print(f"✅ Pobrano i zapisano {len(kierunki)} kierunków")
 
         # 2. Scrapuj i zaktualizuj grupy dla kierunków
@@ -43,6 +48,10 @@ def main():
             print("❌ Nie udało się pobrać grup. Przerywanie.")
             return
 
+        # Konwersja obiektów Grupa do słowników jeśli to konieczne
+        if grupy and hasattr(grupy[0], '__dict__'):
+            grupy = [g.__dict__ for g in grupy]
+
         print(f"✅ Pobrano i zapisano {len(grupy)} grup")
 
         # 3. Scrapuj i zaktualizuj nauczycieli z grup
@@ -51,6 +60,10 @@ def main():
         if not nauczyciele:
             print("⚠️ Nie udało się pobrać nauczycieli. Kontynuowanie bez nauczycieli.")
         else:
+            # Konwersja obiektów Nauczyciel do słowników jeśli to konieczne
+            if hasattr(nauczyciele[0], '__dict__'):
+                nauczyciele = [n.__dict__ for n in nauczyciele]
+
             print(f"✅ Pobrano i zapisano {len(nauczyciele)} nauczycieli")
 
         # 4. Scrapuj plany z plików ICS (równolegle)
