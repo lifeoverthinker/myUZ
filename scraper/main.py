@@ -21,6 +21,26 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
+def konwertuj_na_liste(dane):
+    """Konwertuje pojedynczy obiekt na listę lub pozostawia listę bez zmian."""
+    if dane is None:
+        return []
+    if not isinstance(dane, list):
+        return [dane]
+    return dane
+
+
+def konwertuj_na_slowniki(lista_obiektow):
+    """Konwertuje obiekty w liście na słowniki, jeśli są klasami."""
+    if not lista_obiektow:
+        return []
+
+    # Sprawdź czy elementy mają atrybut __dict__ (są obiektami klas)
+    if hasattr(lista_obiektow[0], '__dict__'):
+        return [obj.__dict__ for obj in lista_obiektow]
+    return lista_obiektow
+
+
 def main():
     """Główna funkcja scrapera, która sekwencyjnie pobiera dane o kierunkach, grupach,
     nauczycielach i planach zajęć, a następnie zapisuje je do bazy danych."""
@@ -31,39 +51,42 @@ def main():
         # 1. Scrapuj i zaktualizuj kierunki
         print("\n📚 ETAP 1: Pobieranie wydziałów i kierunków...")
         kierunki = update_kierunki(upsert=True)
+
+        # Konwersja na listę i słowniki
+        kierunki = konwertuj_na_liste(kierunki)
+        kierunki = konwertuj_na_slowniki(kierunki)
+
         if not kierunki:
             print("❌ Nie udało się pobrać kierunków. Przerywanie.")
             return
-
-        # Konwersja obiektów Kierunek do słowników jeśli to konieczne
-        if kierunki and hasattr(kierunki[0], '__dict__'):
-            kierunki = [k.__dict__ for k in kierunki]
 
         print(f"✅ Pobrano i zapisano {len(kierunki)} kierunków")
 
         # 2. Scrapuj i zaktualizuj grupy dla kierunków
         print("\n👥 ETAP 2: Pobieranie grup dla kierunków...")
         grupy = update_grupy(kierunki)
+
+        # Konwersja na listę i słowniki
+        grupy = konwertuj_na_liste(grupy)
+        grupy = konwertuj_na_slowniki(grupy)
+
         if not grupy:
             print("❌ Nie udało się pobrać grup. Przerywanie.")
             return
-
-        # Konwersja obiektów Grupa do słowników jeśli to konieczne
-        if grupy and hasattr(grupy[0], '__dict__'):
-            grupy = [g.__dict__ for g in grupy]
 
         print(f"✅ Pobrano i zapisano {len(grupy)} grup")
 
         # 3. Scrapuj i zaktualizuj nauczycieli z grup
         print("\n🧑‍🏫 ETAP 3: Pobieranie nauczycieli...")
         nauczyciele = update_nauczyciele(grupy)
+
+        # Konwersja na listę i słowniki
+        nauczyciele = konwertuj_na_liste(nauczyciele)
+        nauczyciele = konwertuj_na_slowniki(nauczyciele)
+
         if not nauczyciele:
             print("⚠️ Nie udało się pobrać nauczycieli. Kontynuowanie bez nauczycieli.")
         else:
-            # Konwersja obiektów Nauczyciel do słowników jeśli to konieczne
-            if hasattr(nauczyciele[0], '__dict__'):
-                nauczyciele = [n.__dict__ for n in nauczyciele]
-
             print(f"✅ Pobrano i zapisano {len(nauczyciele)} nauczycieli")
 
         # 4. Scrapuj plany z plików ICS (równolegle)
