@@ -1,27 +1,10 @@
 """
-Struktura strony
-<H3>Plan grup - lista grup kierunku <i>Historia</i></H3>
-<TABLE class="table table-bordered table-condensed">
-
-      <TR class="odd"><td><a href="grupy_plan.php?ID=29180">11H-SD24 Historia / stacjonarne / drugiego stopnia z tyt. magistra</a></td></tr>
-
-      <TR class="even"><td><a href="grupy_plan.php?ID=29181">11H-SP24 Historia / stacjonarne / pierwszego stopnia z tyt. licencjata</a></td></tr>
-
-      <TR class="odd"><td><a href="grupy_plan.php?ID=29182">21H-SD23 Historia / stacjonarne / drugiego stopnia z tyt. magistra</a></td></tr>
-
-      <TR class="even"><td><a href="grupy_plan.php?ID=29183">21H-SP23 Historia / stacjonarne / pierwszego stopnia z tyt. licencjata</a></td></tr>
-
-      <TR class="odd"><td><a href="grupy_plan.php?ID=29184">31H-SP22 Historia / stacjonarne / pierwszego stopnia z tyt. licencjata</a></td></tr>
-
-</TABLE>
-"""
-"""
 Moduł do pobierania informacji o grupach studenckich z planu UZ.
 """
 import concurrent.futures
 import datetime
+import requests
 from bs4 import BeautifulSoup
-from typing import List
 
 try:
     from tqdm import tqdm
@@ -32,12 +15,11 @@ except ImportError:
         return iterable
 
 from scraper.downloader import fetch_page, BASE_URL
-from scraper.models import Grupa, Kierunek
-from scraper.parsers.grupy_parser import parse_grupy as parse_grupy_parser
+from scraper.parsers.grupy_parser import parsuj_html_grupa  # Używamy aliasu zamiast parse_grupa_details
 from scraper.ics_updater import aktualizuj_plany_grup
 
-def parse_grupy_html(html, nazwa_kierunku, wydzial, kierunek_id) -> List[Grupa]:
-    """Parsuje grupy z HTML."""
+def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
+    """Parsuje grupy z HTML strony kierunku."""
     soup = BeautifulSoup(html, 'html.parser')
     grupy = []
 
@@ -90,16 +72,16 @@ def parse_grupy_html(html, nazwa_kierunku, wydzial, kierunek_id) -> List[Grupa]:
             ics_link = f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG" if grupa_id else None
 
             if grupa_id:
-                grupa = Grupa(
-                    grupa_id=grupa_id,
-                    kod_grupy=kod_grupy,
-                    kierunek_id=kierunek_id,
-                    wydzial=wydzial,
-                    tryb_studiow=tryb_studiow,
-                    semestr=semestr,
-                    link_grupy=full_link,
-                    link_ics_grupy=ics_link
-                )
+                grupa = {
+                    'grupa_id': grupa_id,
+                    'kod_grupy': kod_grupy,
+                    'kierunek_id': kierunek_id,
+                    'wydzial': wydzial,
+                    'tryb_studiow': tryb_studiow,
+                    'semestr': semestr,
+                    'link_grupy': full_link,
+                    'link_ics_grupy': ics_link
+                }
                 grupy.append(grupa)
 
         return grupy
@@ -107,33 +89,77 @@ def parse_grupy_html(html, nazwa_kierunku, wydzial, kierunek_id) -> List[Grupa]:
         print(f"❌ Błąd parsowania grup: {e}")
         return []
 
-def scrape_grupy_for_kierunki(kierunki: list) -> List[Grupa]:
-    """Scrapuje grupy dla listy kierunków."""
+def scrape_grupy_for_kierunki(kierunki, verbose=True):
+    """Scrapuje grupy dla podanych kierunków."""
     wszystkie_grupy = []
 
     for kierunek in kierunki:
-        # Sprawdź typ kierunku przed próbą dostępu do atrybutów
-        if isinstance(kierunek, str):
-            print(f"❌ Pominięto kierunek przekazany jako string: {kierunek}")
+        if verbose:
+            print(f"Pobieranie grup dla kierunku: {kierunek.get('nazwa_kierunku')}")
+
+        link_kierunku = kierunek.get('link_strony_kierunku')
+        if not link_kierunku:
             continue
 
-        # Obsługa zarówno obiektu Kierunek jak i słownika
-        if isinstance(kierunek, Kierunek):
-            nazwa_kierunku = kierunek.nazwa_kierunku
-            wydzial = kierunek.wydzial
-            kierunek_id = kierunek.kierunek_id
-            link_kierunku = kierunek.link_strony_kierunku
-        else:
-            nazwa_kierunku = kierunek.get('nazwa_kierunku', 'Nieznany kierunek')
-            wydzial = kierunek.get('wydzial', 'Nieznany wydział')
-            kierunek_id = kierunek.get('id') or kierunek.get('kierunek_id')
-            link_kierunku = kierunek.get('link_kierunku') or kierunek.get('link_strony_kierunku')
+        try:
+            response = requests.get(link_kierunku)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
 
-        print(f"\n🔍 Pobieram grupy dla kierunku: {nazwa_kierunku}")
-        html = fetch_page(link_kierunku)
-        if html:
-            grupy = parse_grupy_html(html, nazwa_kierunku, wydzial, kierunek_id)
-            wszystkie_grupy.extend(grupy)
-            print(f"✅ Pobrano {len(grupy)} grup dla kierunku {nazwa_kierunku}")
+            # Znajdujemy linki do grup
+            grupy_links = soup.find_all('a', href=lambda href: href and 'grupy_plan.php?ID=' in href)
+
+            for link in grupy_links:
+                href = link.get('href', '')
+                link_text = link.text.strip()
+
+                # Wyciągamy tryb studiów bezpośrednio z tekstu linku
+                tryb_studiow = "nieznany"
+                if "niestacjonarne" in link_text.lower():
+                    tryb_studiow = "niestacjonarne"
+                elif "stacjonarne" in link_text.lower():
+                    tryb_studiow = "stacjonarne"
+
+                if 'ID=' in href:
+                    grupa_id = href.split('ID=')[1].split('&')[0]
+                else:
+                    continue
+
+                grupa_url = f"{BASE_URL}{href}"
+                try:
+                    grupa_response = requests.get(grupa_url)
+                    grupa_response.raise_for_status()
+                    grupa_info = parsuj_html_grupa(grupa_response.text)
+
+                    grupa_data = {
+                        'grupa_id': grupa_id,
+                        'kod_grupy': grupa_info['kod_grupy'],
+                        'link_grupy': grupa_url,
+                        'kierunek_id': kierunek.get('id'),
+                        'semestr': grupa_info['semestr'],
+                        'tryb_studiow': tryb_studiow if tryb_studiow != "nieznany" else grupa_info['tryb_studiow'],
+                        'link_ics_grupy': f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG"
+                    }
+                    wszystkie_grupy.append(grupa_data)
+
+                except Exception as e:
+                    if verbose:
+                        print(f"  Błąd pobierania szczegółów grupy {grupa_id}: {e}")
+                    # Awaryjnie użyj podstawowych danych
+                    grupa_data = {
+                        'grupa_id': grupa_id,
+                        'kod_grupy': link_text,
+                        'link_grupy': grupa_url,
+                        'kierunek_id': kierunek.get('id'),
+                        'tryb_studiow': tryb_studiow,
+                        'link_ics_grupy': f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG"
+                    }
+                    wszystkie_grupy.append(grupa_data)
+
+        except Exception as e:
+            print(f"Błąd podczas pobierania grup dla kierunku: {e}")
+
+    if verbose:
+        print(f"Znaleziono łącznie {len(wszystkie_grupy)} grup")
 
     return wszystkie_grupy

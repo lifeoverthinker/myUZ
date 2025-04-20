@@ -1,117 +1,93 @@
 """
-<H2>Plan zajęć</H2><H2>31H-SP22</H2><H3>Historia<br />stacjonarne / pierwszego stopnia z tyt. licencjata<br />semestr letni 2024/2025</H3>
-<!-- Nav tabs -->
-    <ul class="nav nav-tabs" role="tablist">
-      <li class="active">
-          <a href="#groups" role="tab" data-toggle="tab">
-              Tygodniowy
-          </a>
-      </li>
-      <li><a href="#details" role="tab" data-toggle="tab">
-              Szczegółowy
-          </a>
-      </li>
-
-        <li class="pull-right dropdown">
-            <a class="btn btn-success dropdown-toggle" style="margin-top: 4px;"  data-toggle="dropdown" href="#">Pobierz kalendarz (ICS) <span class="caret"></span></a>
-            <ul class="dropdown-menu">
-
-              <li class="hz">
-                    <a href="https://plan.uz.zgora.pl//grupy_ics.php?ID=29184&KIND=GG" id="idGG" target="_blank">Google</a>
-                    <a href="#"  data-toggle="tooltip" data-placement="top"  data-html="true" title="Kopiuj link do schowka" onclick="copyTextToClipboard('idGG');"><i class="fa fa-copy"></i></a>
-              </li>
-              <li class="divider"></li>
-              <li class="hz">
-                    <a href="https://plan.uz.zgora.pl//grupy_ics.php?ID=29184&KIND=TB" id="idTB" target="_blank">Thunderbird</a>
-                    <a href="#"  data-toggle="tooltip" data-placement="top"  data-html="true" title="Kopiuj link do schowka" onclick="copyTextToClipboard('idTB');"><i class="fa fa-copy"></i></a>
-              </li>
-              <li class="divider"></li>
-              <li class="hz">
-                    <a href="https://plan.uz.zgora.pl//grupy_ics.php?ID=29184&KIND=MS" id="idMS" target="_blank">Microsoft / Zimbra</a>
-                    <a href="#"  data-toggle="tooltip" data-placement="top"  data-html="true" title="Kopiuj link do schowka" onclick="copyTextToClipboard('idMS');"><i class="fa fa-copy"></i></a>
-              </li>
-            </ul>
-        </li>
-    </ul>
-	  <div id="filter_div" class="filter_div">
-		<b>Filtr: </b>
-        <div class="label_main">
-			<div class="label">
-				<label> Tydzień <input type="checkbox" id="week" name="week" checked onclick="clickWeek()" />: </label>
-				<label> <input type="checkbox" id="day1" name="day1" checked onclick="applyFilters()" /> Po </label>
-				<label> <input type="checkbox" id="day2" name="day2" checked onclick="applyFilters()" /> Wt </label>
-				<label> <input type="checkbox" id="day3" name="day3" checked onclick="applyFilters()" /> Śr </label>
-				<label> <input type="checkbox" id="day4" name="day4" checked onclick="applyFilters()" /> Cz </label>
-				<label> <input type="checkbox" id="day5" name="day5" checked onclick="applyFilters()" /> Pi </label>
-			</div>
-			<div class="label">
-				<label> Weekend <input type="checkbox" id="weekend" name="weekend" checked onclick="clickWeekEnd()" />: </label>
-				<label> <input type="checkbox" id="day6" name="day6" checked onclick="applyFilters()" /> So </label>
-				<label> <input type="checkbox" id="day7" name="day7" checked onclick="applyFilters()" /> Ni </label>
-			</div>
-			<div class="label">
-				<label> Nieregularne (Nr) <input type="checkbox" id="dayn" name="dayn" checked onclick="applyFilters()" /> </label>
-			</div>
-			<div class="label">
-				<label> RZ: </label>
-				<label> <input type="checkbox" id="rzD" name="rzD" checked onclick="applyFilters()" /> Dydaktyczne </label>
-				<label> <input type="checkbox" id="rzR" name="rzR" checked onclick="applyFilters()" /> Rezerwacje </label>
-				<label> <input type="checkbox" id="rzE" name="rzE" checked onclick="applyFilters()" /> Egzaminy </label>
-			</div>
-
-        </div>
-		<p style="margin-top: 6px; padding-top: 6px;  border-top: 1px solid #d0d0d0;"><p>Legenda: PG - Pogrupy. <a href="rodzaje_zajec.php">RZ - rodzaj zajęć</a>. <img class="classroom_icon_stand" /> - zajęcia bezpośrednie (na terenie UZ), <img class="classroom_icon_distant" /> - zajęcia prowadzone zdalnie.</p>
-      </div>
-
-
-<!-- -->
-    <div class="tab-content">
-      <div class="tab-pane fade active in" id="groups">
-<!-- -->
-
-<TABLE id="table_groups" class="table table-bordered table-condensed">
-    <tr class="gray">
-        <th align="center" width="2%">PG</th>
-        <th align="center" width="2%">Od</th>
-        <th align="center" width="2%">Do</th>
-        <th width="32%">Przedmiot</th>
-        <th width="2%">RZ</th>
-        <th width="25%">Nauczyciel</th>
-        <th width="15%">Miejsce</th>
-        <th width="20%">Terminy</th>
-    </tr>
-
-          <tr class="gray" id="label_day2">
-              <td colspan="8" width="100%" class="gray-day">Wtorek</td>
-          </tr>
-
-    <TR class="even day2 rzD">
-        <td class="PG">&nbsp;</td>
-        <td align="center">08:00</td>
-        <td align="center">09:30</td>
-        <td>Przedmiot do wyboru - Znaczenie gospodarki w architekturze bezpieczeństwa narodowego  <a href="https://classroom.google.com/c/NzM4NTczOTg3NzM1"><img  data-toggle="tooltip" data-placement="top"  data-html="true" src="img/link-classroom.png"  title="Google Classroom" /></a> </td>
-        <td><label  data-toggle="tooltip" data-placement="top"  data-html="true" class="rz" title="Ć - Ćwiczenia">Ć</label></td>
-        <td><a href="nauczyciel_plan.php?ID=37051">dr Łukasz Janeczek</a></td>
-        <td><img  data-toggle="tooltip" data-placement="top"  data-html="true" title="Zajęcia bezpośrednie" class="classroom_icon_stand" /> <a href="sale_plan.php?ID=3304">117 A-20</a></td>
-        <td><a href="kalendarze_lista_szczegoly.php?ID=2428">D</a></td>
-    </tr>
-"""
-
-"""
 Moduł do parsowania danych dotyczących grup studenckich.
 """
-
+from bs4 import BeautifulSoup
 from icalendar import Calendar
 import re
-from scraper.models import Grupa, Zajecia
-from bs4 import BeautifulSoup
-from typing import List
+from typing import Tuple, List, Dict, Optional, Any
 
 from scraper.downloader import fetch_page, BASE_URL
 
 
-def parse_ics(content: str, grupa_id=None) -> List[Zajecia]:
-    """Parsuje plik ICS i wydobywa wydarzenia."""
+def wyodrebnij_dane_z_summary(summary: str, categories: Optional[Any] = None) -> Tuple[
+    str, Optional[str], Optional[str], str]:
+    """
+    Ekstrahuje przedmiot, rodzaj zajęć (RZ), nauczyciela i podgrupę (PG) z opisu.
+
+    Args:
+        summary: Pole SUMMARY z pliku ICS
+        categories: Pole CATEGORIES z pliku ICS (opcjonalne)
+    """
+    przedmiot = summary
+    nauczyciel = None
+    pg = "CAŁY KIERUNEK"
+
+    # Rodzaj zajęć bierzemy wyłącznie z categories
+    rz = None
+    if categories:
+        try:
+            # Próba konwersji obiektu vCategory na string
+            rz = str(categories).strip()
+        except:
+            pass
+
+    # Szukamy wzorca do wyodrębnienia nazwy przedmiotu i nauczyciela
+    match = re.search(r"(.*?)\s*\(([^():]+)\):\s+(.+)", summary)
+    if match:
+        przedmiot = match.group(1).strip()
+        nauczyciel = match.group(3).strip()
+    else:
+        przedmiot = summary.strip()
+
+    # Szukamy podgrupy PG w nawiasie, np. (PG: SN)
+    pg_match = re.search(r"\(PG:\s*([^)]+)\)", summary)
+    if pg_match:
+        pg = pg_match.group(1).strip()
+        # Usuwamy ten fragment z nauczyciela
+        nauczyciel = re.sub(r"\(PG:.*?\)", "", nauczyciel).strip() if nauczyciel else None
+
+    return przedmiot, rz, nauczyciel, pg
+
+
+def parse_grupa_details(html_content):
+    """Parsuje HTML planu zajęć grupy, wyciągając kod grupy, tryb studiów i semestr."""
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    # Kod grupy z drugiego elementu H2
+    h2_elements = soup.find_all('h2')
+    kod_grupy = h2_elements[1].text.strip() if len(h2_elements) > 1 else "Nieznany"
+
+    # Informacje z H3
+    h3 = soup.find('h3')
+    h3_text = h3.text if h3 else ""
+
+    # Tryb studiów - szukamy dokładniej
+    tryb_studiow = "nieznany"
+    if "niestacjonarne" in h3_text.lower():
+        tryb_studiow = "niestacjonarne"
+    elif "stacjonarne" in h3_text.lower():
+        tryb_studiow = "stacjonarne"
+
+    # Semestr
+    semestr = "nieznany"
+    if "letni" in h3_text.lower():
+        semestr = "letni"
+    elif "zimowy" in h3_text.lower():
+        semestr = "zimowy"
+
+    return {
+        "kod_grupy": kod_grupy,
+        "tryb_studiow": tryb_studiow,
+        "semestr": semestr
+    }
+
+
+# Alias dla zachowania kompatybilności
+parsuj_html_grupa = parse_grupa_details
+
+
+def parse_ics(content: str, grupa_id=None) -> List[Dict[str, Any]]:
+    """Parsuje plik ICS i wydobywa wydarzenia (zajęcia)."""
     events = []
     cal = Calendar.from_ical(content)
 
@@ -123,140 +99,89 @@ def parse_ics(content: str, grupa_id=None) -> List[Zajecia]:
         start = component.get("DTSTART").dt
         end = component.get("DTEND").dt
         location = component.get("LOCATION")
-        categories = component.get("CATEGORIES", "")  # Pobierz rodzaj zajęć z CATEGORIES
+        categories = component.get("CATEGORIES")
 
-        # Domyślne wartości
-        przedmiot = summary
-        rz = categories if categories else None  # Użyj CATEGORIES jako rodzaj zajęć
-        nauczyciel = None
-        pg = "CAŁY KIERUNEK"
+        # Wyodrębnianie danych z summary z uwzględnieniem categories jeśli dostępne
+        przedmiot, rz, nauczyciel, pg = wyodrebnij_dane_z_summary(summary, categories)
 
-        # Szukamy głównego nawiasu z typem zajęć (Ć, W, K, etc.) i nauczyciela
-        match = re.search(r"\(([^():]+)\):\s+(.+)", summary)
-        if match:
-            przedmiot = summary[:match.start()].strip()
-            nauczyciel = match.group(2).strip()
+        event_data = {
+            "przedmiot": przedmiot,
+            "rz": rz,
+            "nauczyciel": nauczyciel,
+            "pg": pg,
+            "od": start,
+            "do_": end,
+            "miejsce": location
+        }
 
-        # Szukamy podgrupy PG w nawiasie, np. (PG: SN)
-        pg_match = re.search(r"\(PG:\s*([^)]+)\)", summary)
-        if pg_match:
-            pg = pg_match.group(1).strip()
-            # Ograniczenie długości podgrupy do 20 znaków
-            if len(pg) > 20:
-                pg = pg[:20]
-            # Usuwamy ten fragment z nauczyciela
-            nauczyciel = re.sub(r"\(PG:.*?\)", "", nauczyciel).strip() if nauczyciel else None
+        # Dodaj grupa_id jeśli podano
+        if grupa_id is not None:
+            event_data["grupa_id"] = grupa_id
 
-        # Tworzenie obiektu Zajecia zamiast słownika
-        zajecia = Zajecia(
-            grupa_id=grupa_id,
-            przedmiot=przedmiot,
-            rz=rz,
-            nauczyciel=nauczyciel,
-            pg=pg,
-            od=start,
-            do_=end,
-            miejsce=location
-        )
-
-        events.append(zajecia)
+        events.append(event_data)
 
     return events
 
 
-def fetch_grupa_semestr(url: str) -> str:
-    """Pobiera informację o semestrze z podstrony grupy."""
+def wyodrebnij_semestr_i_tryb(h3_tag) -> Tuple[str, str]:
+    """Ekstrahuje semestr i tryb studiów z tagu H3."""
+    semestr = "nieznany"
+    tryb_studiow = "nieznany"
+
+    if h3_tag:
+        text = h3_tag.get_text(strip=True).lower()
+        if "semestr letni" in text:
+            semestr = "letni"
+        elif "semestr zimowy" in text:
+            semestr = "zimowy"
+
+        if "stacjonarne" in text and "niestacjonarne" not in text:
+            tryb_studiow = "stacjonarny"
+        elif "niestacjonarne" in text:
+            tryb_studiow = "niestacjonarny"
+
+    return semestr, tryb_studiow
+
+
+def wyodrebnij_kod_grupy(h2_tags) -> str:
+    """Ekstrahuje kod grupy z drugiego tagu H2."""
+    if len(h2_tags) < 2:
+        raise ValueError("Nie znaleziono drugiego <h2> z kodem grupy.")
+
+    kod_grupy_text = h2_tags[1].get_text(strip=True)
+
+    # Wyodrębnij krótszy kod - pierwszą część przed spacją lub '/'
+    kod_parts = re.split(r'[ /]', kod_grupy_text)
+    if kod_parts and kod_parts[0]:
+        return kod_parts[0]
+
+    return kod_grupy_text
+
+
+def pobierz_semestr_i_tryb_z_grupy(url: str) -> Tuple[str, str]:
+    """Pobiera informację o semestrze i trybie studiów z podstrony grupy."""
+    print(f"Pobieranie semestru i trybu z URL: {url}")
     html = fetch_page(url)
     if not html:
-        return "nieznany"
+        print("❌ Nie udało się pobrać HTML!")
+        return "nieznany", "nieznany"
 
     soup = BeautifulSoup(html, "html.parser")
     h3_tag = soup.find('h3')
 
-    if not h3_tag or not h3_tag.text:
-        return "nieznany"
+    if not h3_tag:
+        print("❌ Nie znaleziono tagu h3 w HTML!")
+    else:
+        print(f"Znaleziony tekst h3: {h3_tag.get_text(strip=True)}")
 
-    text = h3_tag.text.lower()
-
-    # Szukaj tylko słowa "letni" lub "zimowy"
-    if "semestr letni" in text:
-        return "letni"
-    elif "semestr zimowy" in text:
-        return "zimowy"
-
-    return "nieznany"
+    semestr, tryb = wyodrebnij_semestr_i_tryb(h3_tag)
+    print(f"Wyodrębniony semestr: {semestr}, tryb: {tryb}")
+    return semestr, tryb
 
 
-def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id) -> List[Grupa]:
-    """Parsuje grupy z HTML."""
-    soup = BeautifulSoup(html, 'html.parser')
-    grupy = []
+def pobierz_semestr_z_grupy(url: str) -> str:
+    """Pobiera informację o semestrze z podstrony grupy."""
+    semestr, _ = pobierz_semestr_i_tryb_z_grupy(url)
+    return semestr
 
-    try:
-        # Znajdź kod grupy z drugiego tagu H2
-        h2_tags = soup.find_all("h2")
-        kod_grupy_ogolny = None
-        if len(h2_tags) >= 2:
-            kod_grupy_ogolny = h2_tags[1].text.strip()
-        else:
-            kod_grupy_ogolny = "nieznany"
-
-        # Znajdź informację o semestrze i trybie studiów w nagłówku H3
-        semestr = "nieznany"
-        tryb_studiow_ogolny = "nieznany"
-
-        h3_tags = soup.find_all("h3")
-        for h3 in h3_tags:
-            text = h3.text.lower()
-            # Wykrywanie semestru
-            if "semestr letni" in text:
-                semestr = "letni"
-            elif "semestr zimowy" in text:
-                semestr = "zimowy"
-
-            # Wykrywanie trybu studiów
-            if "stacjonarne" in text and "niestacjonarne" not in text:
-                tryb_studiow_ogolny = "stacjonarne"
-            elif "niestacjonarne" in text:
-                tryb_studiow_ogolny = "niestacjonarne"
-
-        # Znajdź wszystkie wiersze tabeli z linkami do grup
-        rows = soup.select("tr.odd td a, tr.even td a")
-
-        for row in rows:
-            link = row.get('href')
-
-            if not link:
-                continue
-
-            # Przygotuj pełne URL do planu grupy
-            full_link = f"{BASE_URL}{link}" if link and not link.startswith('http') else link
-
-            # Wydobycie ID grupy z linku
-            grupa_id = None
-            if "ID=" in link:
-                try:
-                    grupa_id = link.split("ID=")[1].split("&")[0]
-                except (IndexError, ValueError):
-                    pass
-
-            # Generuj link do pliku ICS
-            ics_link = f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG" if grupa_id else None
-
-            if grupa_id:
-                grupa = Grupa(
-                    grupa_id=grupa_id,
-                    kod_grupy=kod_grupy_ogolny,
-                    kierunek_id=kierunek_id,
-                    wydzial=wydzial,
-                    tryb_studiow=tryb_studiow_ogolny,
-                    semestr=semestr,
-                    link_grupy=full_link,
-                    link_ics_grupy=ics_link
-                )
-                grupy.append(grupa)
-
-        return grupy
-    except Exception as e:
-        print(f"❌ Błąd parsowania grup: {e}")
-        return []
+# Usunięto funkcję parse_grupy - pozostaje tylko w scraper/scrapers/grupy_scraper.py

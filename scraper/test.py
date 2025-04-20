@@ -1,40 +1,44 @@
-from scraper.downloader import fetch_page
-from scraper.parsers.grupy_parser import parse_grupy
-from scraper.models import Grupa
+import os
+import sys
+import requests
+from bs4 import BeautifulSoup
+
+# Importujemy funkcje z istniejących plików
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scraper.ics_updater import BASE_URL
 
 
-def test_grupa_parsing():
-    # URL do testowania
-    url = "https://plan.uz.zgora.pl/grupy_plan.php?ID=29041"
 
-    # Pobierz stronę
-    html = fetch_page(url)
+def test_parsowania_grupy(grupa_id):
+    """Testuje parsowanie informacji o grupie."""
+    url = f"{BASE_URL}grupy_plan.php?ID={grupa_id}"  # Poprawiony URL
 
-    if not html:
-        print("❌ Nie udało się pobrać strony")
-        return
+    print(f"🔍 Pobieranie i parsowanie informacji o grupie {grupa_id}")
+    print(f"URL: {url}")
 
-    # Testowe wartości dla pozostałych parametrów
-    nazwa_kierunku = "Test kierunek"
-    wydzial = "Test wydział"
-    kierunek_id = "test_id"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
 
-    # Parsowanie grupy
-    grupy = parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id)
+        info_grupy = parsuj_html_grupa(response.text)
 
-    if not grupy:
-        print("❌ Nie znaleziono żadnych grup")
-        return
+        print("\n=== INFORMACJE O GRUPIE ===")
+        print(f"Kod grupy: {info_grupy['kod_grupy']}")
+        print(f"Tryb studiów: {info_grupy['tryb_studiow']}")
+        print(f"Semestr: {info_grupy['semestr']}")
 
-    # Wyświetlenie wyników (teraz używamy atrybutów obiektu)
-    grupa = grupy[0]
-    print("\n📊 Wyniki parsowania:")
-    print(f"• Kod grupy: {grupa.kod_grupy}")
-    print(f"• Semestr: {grupa.semestr}")
-    print(f"• Tryb studiów: {grupa.tryb_studiow}")
-    print(f"• Grupa ID: {grupa.grupa_id}")
-    print(f"• Link ICS: {grupa.link_ics_grupy}")
+        return info_grupy
+    except Exception as e:
+        print(f"❌ Błąd podczas pobierania/parsowania informacji o grupie: {e}")
+        return None
 
 
 if __name__ == "__main__":
-    test_grupa_parsing()
+    # Domyślne ID grupy do testów
+    grupa_id = "29294"  # Można zmienić na rzeczywiste ID
+
+    # Jeśli podano argument w linii poleceń, użyj go
+    if len(sys.argv) > 1:
+        grupa_id = sys.argv[1]
+
+    test_parsowania_grupy(grupa_id)

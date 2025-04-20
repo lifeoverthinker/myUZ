@@ -5,8 +5,11 @@ import os
 from supabase import create_client
 from scraper.scrapers.kierunki_scraper import scrape_kierunki
 from scraper.scrapers.grupy_scraper import scrape_grupy_for_kierunki
-from scraper.scrapers.nauczyciel_scraper import scrape_nauczyciele_from_grupy
+from scraper.parsers.nauczyciel_parser import scrape_nauczyciele_from_grupy
 import datetime
+from tqdm import tqdm
+import postgrest.exceptions
+from scraper.ics_updater import BASE_URL
 
 load_dotenv()
 
@@ -14,21 +17,26 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-def _utworz_powiazanie_nauczyciel_grupa(nauczyciel_id, grupa_id):
-    """Tworzy powiązanie nauczyciel-grupa poprzez tabelę nauczyciele_grupy."""
+
+def _utworz_powiazanie_nauczyciel_grupa(nauczyciel_id, grupa_id, uuid_map=None):
+    """Tworzy powiązanie nauczyciel-grupa używając poprawnego UUID."""
     try:
-        # Użyj bezpośredniego powiązania przez tabelę nauczyciele_grupy
+        # Sprawdź czy grupa_id to UUID czy oryginalny ID liczbowy
+        if uuid_map and grupa_id in uuid_map:
+            grupa_uuid = uuid_map[grupa_id]
+        else:
+            grupa_uuid = grupa_id  # Zakładamy, że to już UUID
+
         relacja_data = {
             'nauczyciel_id': nauczyciel_id,
-            'grupa_id': grupa_id
+            'grupa_id': grupa_uuid
         }
 
         supabase.table('nauczyciele_grupy').insert(relacja_data).execute()
         return True
     except Exception as e:
-        print(f"⚠️ Nie udało się utworzyć powiązania dla nauczyciela {nauczyciel_id}: {e}")
+        print(f"⚠️ Nie udało się utworzyć powiązania nauczyciel-grupa: {e}")
         return False
-
 
 def _utworz_powiazania_zajecia(zajecia_data, events):
     """Tworzy powiązania zajęć z grupami i nauczycielami."""
@@ -153,6 +161,11 @@ def save_events(events, source_type=None):
             od = event.get('od')
             do_ = event.get('do_')
 
+            # Skracanie podgrupy do maksymalnie 20 znaków
+            podgrupa = event.get('pg')
+            if podgrupa and isinstance(podgrupa, str) and len(podgrupa) > 20:
+                podgrupa = podgrupa[:17] + '...'
+
             event_data = {
                 'przedmiot': event.get('przedmiot'),
                 'od': od.isoformat() if isinstance(od, datetime.datetime) else od,
@@ -160,8 +173,9 @@ def save_events(events, source_type=None):
                 'miejsce': event.get('miejsce'),
                 'rz': event.get('rz'),
                 'link_ics_zrodlowy': event.get('link_ics'),
-                'podgrupa': event.get('pg'),
-                'uid': event.get('uid')
+                'podgrupa': podgrupa,
+                'uid': event.get('uid'),
+                'source_type': event.get('source_type')  # Upewniam się, że source_type trafi do bazy
             }
 
             events_data.append(event_data)
@@ -181,7 +195,6 @@ def save_events(events, source_type=None):
         print(f"❌ Błąd podczas zapisywania wydarzeń: {e}")
         import traceback
         traceback.print_exc()
-
 
 def update_kierunki(upsert=True):
     """Aktualizuje kierunki z funkcją upsert."""
@@ -241,7 +254,7 @@ def update_kierunki(upsert=True):
         return []
 
 
-def update_nauczyciele(grupy=None):
+def update_nauczyciele(grupy=None, uuid_map=None):
     """Aktualizuje nauczycieli z funkcją upsert."""
     if not grupy:
         return []
@@ -303,8 +316,8 @@ def update_nauczyciele(grupy=None):
             if insert_result.data:
                 for i, data in enumerate(insert_result.data):
                     nauczyciel = next((n for n in nauczyciele if
-                                       (n.get('email') not in email_map) and
-                                       (n.get('imie_nazwisko') not in nazwa_map)), None)
+                                      (n.get('email') not in email_map) and
+                                      (n.get('imie_nazwisko') not in nazwa_map)), None)
                     if nauczyciel:
                         nauczyciel['id'] = data['id']
 
@@ -313,11 +326,11 @@ def update_nauczyciele(grupy=None):
             for item in to_update:
                 supabase.table('nauczyciele').update(item).eq('id', item['id']).execute()
 
-        # Tworzenie powiązań nauczyciel-grupa
+        # Tworzenie powiązań nauczyciel-grupa z przekazaniem mapy UUID
         for nauczyciel in nauczyciele:
             if 'id' in nauczyciel and 'grupy_id' in nauczyciel:
                 for grupa_id in nauczyciel['grupy_id']:
-                    _utworz_powiazanie_nauczyciel_grupa(nauczyciel['id'], grupa_id)
+                    _utworz_powiazanie_nauczyciel_grupa(nauczyciel['id'], grupa_id, uuid_map)
 
         print(f"✅ Zaktualizowano {len(to_update)} nauczycieli, dodano {len(to_insert)} nowych")
         return nauczyciele
@@ -325,127 +338,59 @@ def update_nauczyciele(grupy=None):
         print(f"❌ Błąd podczas aktualizacji nauczycieli: {e}")
         return []
 
-
-def update_grupy(kierunki, upsert=True):
-    """Aktualizuje grupy dla podanych kierunków."""
+def update_grupy(grupy):
+    """Aktualizuje informacje o grupach w bazie danych."""
     try:
-        wszystkie_grupy = []
+        print(f"Aktualizuję informacje o {len(grupy)} grupach...")
 
-        for kierunek in kierunki:
-            nazwa_kierunku = kierunek.get('nazwa_kierunku')
-            link_kierunku = kierunek.get('link_strony_kierunku')
-            id_kierunku = kierunek.get('id')
-            wydzial = kierunek.get('wydzial', 'Nieznany wydział')
+        # Sprawdź pierwsze kilka elementów do debugowania
+        if grupy:
+            print(f"Próbka danych grupy: {grupy[0]}")
 
-            if not id_kierunku:
-                print(f"⚠️ Brak ID dla kierunku: {nazwa_kierunku}")
-                continue
-
-            if not link_kierunku:
-                print(f"⚠️ Brak poprawnego linku dla kierunku: {nazwa_kierunku}")
-                continue
-
-            print(f"🔍 Pobieram grupy dla kierunku: {nazwa_kierunku}")
-            print(f"🔗 Link kierunku: {link_kierunku}")
-
-            # Przygotuj obiekt dla scrapera - uwaga na nazwy pól!
-            kierunek_obj = {
-                'id': id_kierunku,
-                'nazwa_kierunku': nazwa_kierunku,
-                'link_kierunku': link_kierunku,  # Dla scrapera potrzebne jako link_kierunku
-                'wydzial': wydzial
+        # Przygotuj dane do dodania zgodnie z nazwami kolumn w bazie
+        grupy_do_zapisu = []
+        for grupa in grupy:
+            # Użyj jednolitych nazw pól zgodnych z bazą danych
+            grupa_data = {
+                'kod_grupy': grupa.get('kod_grupy'),
+                'semestr': grupa.get('semestr'),
+                'tryb_studiow': grupa.get('tryb_studiow'),
+                'kierunek_id': grupa.get('kierunek_id'),
+                'link_grupy': grupa.get('link_grupy')
             }
 
-            grupy = scrape_grupy_for_kierunki([kierunek_obj])
+            # Link do ICS na podstawie oryginalnego ID
+            if grupa.get('grupa_id'):
+                grupa_data['link_ics_grupy'] = f"{BASE_URL}grupy_ics.php?ID={grupa.get('grupa_id')}&KIND=GG"
 
-            if not grupy:
-                print(f"❌ Brak grup dla kierunku: {nazwa_kierunku}")
-                continue
+            grupy_do_zapisu.append(grupa_data)
 
-            if not isinstance(grupy, list):
-                print(f"❌ Nieprawidłowy format danych grup dla {nazwa_kierunku}")
-                continue
+        # Dodaj szczegółowe logowanie
+        print(f"Przygotowano {len(grupy_do_zapisu)} grup do zapisu")
 
-            valid_grupy = []
-            for grupa in grupy:
-                if isinstance(grupa, dict) and 'kierunek_id' not in grupa:
-                    grupa['kierunek_id'] = id_kierunku
-                valid_grupy.append(grupa)
+        # Zapisz wszystkie grupy
+        wynik = supabase.table('grupy').upsert(grupy_do_zapisu).execute()
 
-            if not valid_grupy:
-                continue
+        # Utwórz mapowanie oryginalnego ID do nowego UUID
+        uuid_map = {}
+        if hasattr(wynik, 'data'):
+            for grupa_db in wynik.data:
+                if grupa_db.get('kod_grupy'):
+                    # Znajdź oryginalną grupę z tym kodem
+                    for grupa in grupy:
+                        if grupa.get('kod_grupy') == grupa_db.get('kod_grupy'):
+                            uuid_map[grupa.get('grupa_id')] = grupa_db['id']
+                            grupa['uuid'] = grupa_db['id']  # Dodaj UUID do oryginalnych obiektów
+                            break
 
-            print(f"📌 Znaleziono {len(valid_grupy)} grup dla kierunku {nazwa_kierunku}")
-            wszystkie_grupy.extend(valid_grupy)
+        ilosc_zapisanych = len(wynik.data) if hasattr(wynik, 'data') else 0
+        print(f"Zapisano {ilosc_zapisanych} grup do bazy danych.")
+        print(f"Utworzono {len(uuid_map)} mapowań UUID.")
 
-        if not upsert:
-            return wszystkie_grupy
-
-        # Pobierz istniejące grupy
-        existing = supabase.table('grupy').select('id,link_ics_grupy').execute()
-        existing_map = {g['link_ics_grupy']: g['id'] for g in existing.data if 'link_ics_grupy' in g}
-
-        to_update = []
-        to_insert = []
-
-        for grupa in wszystkie_grupy:
-            # Skracanie zgodnie z limitami w bazie danych
-            if isinstance(grupa.get('kod_grupy'), str) and len(grupa['kod_grupy']) > 50:
-                grupa['kod_grupy'] = grupa['kod_grupy'][:47] + '...'
-
-            if isinstance(grupa.get('tryb_studiow'), str) and len(grupa['tryb_studiow']) > 50:
-                grupa['tryb_studiow'] = grupa['tryb_studiow'][:47] + '...'
-
-            if isinstance(grupa.get('link_ics_grupy'), str) and len(grupa['link_ics_grupy']) > 255:
-                grupa['link_ics_grupy'] = grupa['link_ics_grupy'][:252] + '...'
-
-            if isinstance(grupa.get('link_grupy'), str) and len(grupa['link_grupy']) > 255:
-                grupa['link_grupy'] = grupa['link_grupy'][:252] + '...'
-
-            if isinstance(grupa.get('semestr'), str) and len(grupa['semestr']) > 255:
-                grupa['semestr'] = grupa['semestr'][:252] + '...'
-
-            link_ics = grupa.get('link_ics_grupy')
-
-            if link_ics in existing_map:
-                grupa['id'] = existing_map[link_ics]
-                to_update.append({
-                    'id': grupa['id'],
-                    'kod_grupy': grupa.get('kod_grupy'),
-                    'tryb_studiow': grupa.get('tryb_studiow'),
-                    'kierunek_id': grupa.get('kierunek_id'),
-                    'link_grupy': grupa.get('link_grupy'),
-                    'link_ics_grupy': link_ics,
-                    'semestr': grupa.get('semestr')
-                })
-            else:
-                to_insert.append({
-                    'kod_grupy': grupa.get('kod_grupy'),
-                    'tryb_studiow': grupa.get('tryb_studiow'),
-                    'kierunek_id': grupa.get('kierunek_id'),
-                    'link_grupy': grupa.get('link_grupy'),
-                    'link_ics_grupy': link_ics,
-                    'semestr': grupa.get('semestr')
-                })
-
-        # Wykonaj wsadowe operacje
-        if to_insert:
-            insert_result = supabase.table('grupy').insert(to_insert).execute()
-            if insert_result.data:
-                for i, data in enumerate(insert_result.data):
-                    if i < len(wszystkie_grupy):
-                        if 'link_ics_grupy' in wszystkie_grupy[i] and wszystkie_grupy[i][
-                            'link_ics_grupy'] not in existing_map:
-                            wszystkie_grupy[i]['id'] = data['id']
-
-        # Aktualizuj istniejące rekordy
-        if to_update:
-            for item in to_update:
-                supabase.table('grupy').update(item).eq('id', item['id']).execute()
-
-        print(f"✅ Zaktualizowano {len(to_update)} grup, dodano {len(to_insert)} nowych")
-        return wszystkie_grupy
+        return wynik.data if hasattr(wynik, 'data') else []
 
     except Exception as e:
-        print(f"❌ Błąd podczas aktualizacji grup: {e}")
+        print(f"Błąd podczas aktualizacji grup: {e}")
+        import traceback
+        traceback.print_exc()
         return []
