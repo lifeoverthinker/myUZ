@@ -89,8 +89,14 @@ def scrape_kierunki() -> List[Kierunek]:
         print("❌ Nie udało się pobrać strony.")
         return []
 
-    return parse_departments_and_courses(html)
+    kierunki = parse_departments_and_courses(html)
 
+    # Upewnij się, że zawsze zwracamy listę
+    if not isinstance(kierunki, list):
+        print(f"⚠️ Wykryto pojedynczy obiekt Kierunek zamiast listy, konwertuję na listę.")
+        return [kierunki] if kierunki else []
+
+    return kierunki
 
 if __name__ == "__main__":
     kierunki = scrape_kierunki()

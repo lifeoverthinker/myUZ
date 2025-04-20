@@ -143,116 +143,231 @@ def save_nauczyciele(nauczyciele):
 
 
 def save_events(events, source_type=None):
-    """Zapisuje wydarzenia (zajęcia) do bazy danych."""
+    """Zapisuje wydarzenia (zajęcia) do bazy danych z mechanizmem upsert."""
     if not events:
-        return
+        return 0
 
-    # Dodanie typu źródła do każdego wydarzenia
-    if source_type:
-        for event in events:
-            event['source_type'] = source_type
+    dodane = 0
+    zaktualizowane = 0
 
-    try:
-        # Przygotuj dane do wsadowego dodania
-        events_data = []
-
-        for event in events:
-            # Konwersja datetime na ISO format dla pól od/do
-            od = event.get('od')
-            do_ = event.get('do_')
-
-            # Skracanie podgrupy do maksymalnie 20 znaków
-            podgrupa = event.get('pg')
-            if podgrupa and isinstance(podgrupa, str) and len(podgrupa) > 20:
-                podgrupa = podgrupa[:17] + '...'
-
-            event_data = {
+    for event in events:
+        try:
+            # Dane do zapisu
+            zajecie_data = {
                 'przedmiot': event.get('przedmiot'),
-                'od': od.isoformat() if isinstance(od, datetime.datetime) else od,
-                'do_': do_.isoformat() if isinstance(do_, datetime.datetime) else do_,
+                'od': event.get('od'),
+                'do_': event.get('do_'),
                 'miejsce': event.get('miejsce'),
                 'rz': event.get('rz'),
-                'link_ics_zrodlowy': event.get('link_ics'),
-                'podgrupa': podgrupa,
+                'link_ics_zrodlowy': event.get('link_ics_zrodlowy'),
+                'podgrupa': event.get('podgrupa'),
                 'uid': event.get('uid'),
-                'source_type': event.get('source_type')  # Upewniam się, że source_type trafi do bazy
+                'source_type': source_type
             }
 
-            events_data.append(event_data)
-
-        # Wsadowe dodanie wydarzeń
-        if events_data:
-            result = supabase.table('zajecia').insert(events_data).execute()
-            print(f"✅ Dodano {len(events_data)} wydarzeń")
-
-            # Tworzenie powiązań z grupami i nauczycielami
-            if result.data:
-                _utworz_powiazania_zajecia(result.data, events)
+            # Najpierw sprawdź po UID
+            if event.get('uid'):
+                wynik = supabase.table('zajecia').select('id').eq('uid', event['uid']).execute()
+                if wynik.data and len(wynik.data) > 0:
+                    # Aktualizuj istniejące
+                    supabase.table('zajecia').update(zajecie_data).eq('uid', event['uid']).execute()
+                    zaktualizowane += 1
+                    zajecie_id = wynik.data[0]['id']
+                else:
+                    # Dodaj nowe
+                    wynik = supabase.table('zajecia').insert(zajecie_data).execute()
+                    if wynik.data:
+                        zajecie_id = wynik.data[0]['id']
+                        dodane += 1
+                    else:
+                        continue
             else:
-                print("⚠️ Brak danych w odpowiedzi po zapisie wydarzeń")
+                # Sprawdź po innych polach
+                wynik = supabase.table('zajecia').select('id')\
+                    .eq('przedmiot', event.get('przedmiot'))\
+                    .eq('od', event.get('od'))\
+                    .eq('do_', event.get('do_'))\
+                    .eq('miejsce', event.get('miejsce'))\
+                    .execute()
 
-    except Exception as e:
-        print(f"❌ Błąd podczas zapisywania wydarzeń: {e}")
-        import traceback
-        traceback.print_exc()
+                if wynik.data and len(wynik.data) > 0:
+                    # Aktualizuj istniejące
+                    supabase.table('zajecia').update(zajecie_data).eq('id', wynik.data[0]['id']).execute()
+                    zaktualizowane += 1
+                    zajecie_id = wynik.data[0]['id']
+                else:
+                    # Dodaj nowe
+                    wynik = supabase.table('zajecia').insert(zajecie_data).execute()
+                    if wynik.data:
+                        zajecie_id = wynik.data[0]['id']
+                        dodane += 1
+                    else:
+                        continue
 
-def update_kierunki(upsert=True):
-    """Aktualizuje kierunki z funkcją upsert."""
+            # Dodaj powiązania
+            if source_type == 'grupa' and 'grupa_id' in event:
+                supabase.table('zajecia_grupy').upsert({
+                    'zajecia_id': zajecie_id,
+                    'grupa_id': event['grupa_id']
+                }).execute()
+
+            elif source_type == 'nauczyciel' and 'nauczyciel_id' in event:
+                supabase.table('zajecia_nauczyciele').upsert({
+                    'zajecia_id': zajecie_id,
+                    'nauczyciel_id': event['nauczyciel_id']
+                }).execute()
+
+        except Exception as e:
+            print(f"Błąd zapisywania zajęcia: {e}")
+
+    print(f"Dodano {dodane} nowych zajęć, zaktualizowano {zaktualizowane} istniejących\n")
+    return dodane + zaktualizowane
+
+def save_events_batch(events, source_type=None, batch_size=200):
+    """Wsadowo zapisuje zajęcia do bazy danych."""
+    if not events:
+        return 0
+
+    saved_count = 0
+    batches = [events[i:i+batch_size] for i in range(0, len(events), batch_size)]
+    print(f"Zapisywanie {len(events)} zajęć w {len(batches)} partiach...")
+
+    for i, batch in enumerate(batches):
+        try:
+            # Przygotowanie danych zgodnie ze strukturą tabeli
+            zajecia_data = []
+            for event in batch:
+                zajecia_data.append({
+                    'przedmiot': event.get('przedmiot'),
+                    'od': event.get('od'),
+                    'do_': event.get('do_'),
+                    'miejsce': event.get('miejsce'),
+                    'rz': event.get('rz'),
+                    'podgrupa': event.get('podgrupa'),
+                    'uid': event.get('uid'),
+                    'link_ics_zrodlowy': event.get('link_ics_zrodlowy'),
+                    'source_type': source_type
+                })
+
+            # Wsadowy upsert
+            wynik = supabase.table('zajecia').upsert(zajecia_data).execute()
+
+            if wynik.data:
+                # Przygotowanie relacji grupowych
+                relacje_grupy = []
+                relacje_nauczyciele = []
+
+                for j, zajecie in enumerate(wynik.data):
+                    event = batch[j]
+                    zajecie_id = zajecie['id']
+
+                    # Relacja zajęcia-grupy
+                    if source_type == 'grupa' and 'grupa_id' in event:
+                        relacje_grupy.append({
+                            'zajecia_id': zajecie_id,
+                            'grupa_id': event['grupa_id']
+                        })
+
+                    # Relacja zajęcia-nauczyciele
+                    elif source_type == 'nauczyciel' and 'nauczyciel_id' in event:
+                        relacje_nauczyciele.append({
+                            'zajecia_id': zajecie_id,
+                            'nauczyciel_id': event['nauczyciel_id']
+                        })
+
+                # Wsadowy zapis relacji
+                if relacje_grupy:
+                    supabase.table('zajecia_grupy').upsert(relacje_grupy).execute()
+
+                if relacje_nauczyciele:
+                    supabase.table('zajecia_nauczyciele').upsert(relacje_nauczyciele).execute()
+
+                saved_count += len(wynik.data)
+                print(f"Zapisano partię {i+1}/{len(batches)} ({len(wynik.data)} zajęć)")
+        except Exception as e:
+            print(f"Błąd zapisywania partii {i+1}: {e}")
+
+    return saved_count
+
+def update_kierunki(kierunki):
+    """Aktualizuje informacje o kierunkach w bazie danych."""
     try:
-        kierunki_data = scrape_kierunki()
+        # Sprawdź czy otrzymaliśmy listę kierunków
+        if not isinstance(kierunki, list):
+            print(f"⚠️ Wykryto pojedynczy obiekt Kierunek zamiast listy, konwertuję na listę.")
+            kierunki = [kierunki] if kierunki else []
 
-        # Synchronizacja nazw pól
-        for kierunek in kierunki_data:
-            if 'link_kierunku' in kierunek and 'link_strony_kierunku' not in kierunek:
-                kierunek['link_strony_kierunku'] = kierunek.pop('link_kierunku')
+        print(f"Aktualizuję informacje o {len(kierunki)} kierunkach...")
 
-        if not upsert:
-            return save_kierunki(kierunki_data)
+        # Sprawdzenie czy lista jest pusta
+        if not kierunki:
+            print("Brak kierunków do zapisania.")
+            return []
 
-        # Pobierz istniejące kierunki
-        existing = supabase.table('kierunki').select('id,link_strony_kierunku').execute()
-        existing_map = {k['link_strony_kierunku']: k['id'] for k in existing.data if 'link_strony_kierunku' in k}
+        # Pobierz istniejące kierunki z bazy
+        existing_kierunki = supabase.table('kierunki').select('id,nazwa_kierunku,link_strony_kierunku').execute()
+        existing_by_name = {k['nazwa_kierunku']: k['id'] for k in existing_kierunki.data if k['nazwa_kierunku']}
+        existing_by_link = {k['link_strony_kierunku']: k['id'] for k in existing_kierunki.data if k['link_strony_kierunku']}
 
+        # Przygotuj dane do dodania lub aktualizacji
         to_update = []
         to_insert = []
 
-        for kierunek in kierunki_data:
-            link = kierunek.get('link_strony_kierunku')
+        for kierunek in kierunki:
+            nazwa = kierunek.nazwa
+            link = kierunek.link
 
-            if link in existing_map:
-                kierunek['id'] = existing_map[link]
+            # Sprawdź czy kierunek już istnieje
+            existing_id = None
+            if nazwa in existing_by_name:
+                existing_id = existing_by_name[nazwa]
+            elif link in existing_by_link:
+                existing_id = existing_by_link[link]
+
+            if existing_id:
+                # Aktualizuj istniejący rekord
                 to_update.append({
-                    'id': kierunek['id'],
-                    'nazwa_kierunku': kierunek.get('nazwa_kierunku'),
-                    'wydzial': kierunek.get('wydzial'),
+                    'id': existing_id,
+                    'nazwa_kierunku': nazwa,
+                    'wydzial': kierunek.wydzial,
                     'link_strony_kierunku': link
                 })
             else:
+                # Dodaj nowy rekord
                 to_insert.append({
-                    'nazwa_kierunku': kierunek.get('nazwa_kierunku'),
-                    'wydzial': kierunek.get('wydzial'),
+                    'nazwa_kierunku': nazwa,
+                    'wydzial': kierunek.wydzial,
                     'link_strony_kierunku': link
                 })
 
-        # Wykonaj wsadowe operacje
-        if to_insert:
-            insert_result = supabase.table('kierunki').insert(to_insert).execute()
-            if insert_result.data:
-                for i, data in enumerate(insert_result.data):
-                    if i < len(kierunki_data) and kierunki_data[i]['link_strony_kierunku'] not in existing_map:
-                        kierunki_data[i]['id'] = data['id']
+        print(f"Do aktualizacji: {len(to_update)}, do dodania: {len(to_insert)}")
 
-        # Aktualizuj istniejące rekordy
+        # Wykonaj aktualizacje
+        updated_records = []
         if to_update:
-            for item in to_update:
-                supabase.table('kierunki').update(item).eq('id', item['id']).execute()
+            for record in to_update:
+                result = supabase.table('kierunki').update(record).eq('id', record['id']).execute()
+                if result.data:
+                    updated_records.extend(result.data)
 
-        print(f"✅ Zaktualizowano {len(to_update)} kierunków, dodano {len(to_insert)} nowych")
-        return kierunki_data
+        # Wykonaj wstawianie
+        inserted_records = []
+        if to_insert:
+            result = supabase.table('kierunki').insert(to_insert).execute()
+            if result.data:
+                inserted_records = result.data
+
+        all_records = updated_records + inserted_records
+
+        print(f"Zaktualizowano {len(updated_records)} kierunków, dodano {len(inserted_records)} nowych.")
+
+        return all_records
+
     except Exception as e:
-        print(f"❌ Błąd podczas aktualizacji kierunków: {e}")
+        print(f"Błąd podczas aktualizacji kierunków: {e}")
+        import traceback
+        traceback.print_exc()
         return []
-
 
 def update_nauczyciele(grupy=None, uuid_map=None):
     """Aktualizuje nauczycieli z funkcją upsert."""
@@ -343,14 +458,14 @@ def update_grupy(grupy):
     try:
         print(f"Aktualizuję informacje o {len(grupy)} grupach...")
 
-        # Sprawdź pierwsze kilka elementów do debugowania
-        if grupy:
-            print(f"Próbka danych grupy: {grupy[0]}")
+        # Sprawdzenie czy lista jest pusta
+        if not grupy:
+            print("Brak grup do zapisania.")
+            return []
 
         # Przygotuj dane do dodania zgodnie z nazwami kolumn w bazie
         grupy_do_zapisu = []
         for grupa in grupy:
-            # Użyj jednolitych nazw pól zgodnych z bazą danych
             grupa_data = {
                 'kod_grupy': grupa.get('kod_grupy'),
                 'semestr': grupa.get('semestr'),
@@ -359,38 +474,138 @@ def update_grupy(grupy):
                 'link_grupy': grupa.get('link_grupy')
             }
 
-            # Link do ICS na podstawie oryginalnego ID
             if grupa.get('grupa_id'):
                 grupa_data['link_ics_grupy'] = f"{BASE_URL}grupy_ics.php?ID={grupa.get('grupa_id')}&KIND=GG"
 
             grupy_do_zapisu.append(grupa_data)
 
-        # Dodaj szczegółowe logowanie
         print(f"Przygotowano {len(grupy_do_zapisu)} grup do zapisu")
 
-        # Zapisz wszystkie grupy
-        wynik = supabase.table('grupy').upsert(grupy_do_zapisu).execute()
+        # Zapisz grupy tylko jeśli lista nie jest pusta
+        if grupy_do_zapisu:
+            wynik = supabase.table('grupy').upsert(grupy_do_zapisu).execute()
 
-        # Utwórz mapowanie oryginalnego ID do nowego UUID
-        uuid_map = {}
-        if hasattr(wynik, 'data'):
-            for grupa_db in wynik.data:
-                if grupa_db.get('kod_grupy'):
-                    # Znajdź oryginalną grupę z tym kodem
-                    for grupa in grupy:
-                        if grupa.get('kod_grupy') == grupa_db.get('kod_grupy'):
-                            uuid_map[grupa.get('grupa_id')] = grupa_db['id']
-                            grupa['uuid'] = grupa_db['id']  # Dodaj UUID do oryginalnych obiektów
-                            break
+            # Utwórz mapowanie oryginalnego ID do nowego UUID
+            uuid_map = {}
+            if hasattr(wynik, 'data'):
+                for grupa_db in wynik.data:
+                    if grupa_db.get('kod_grupy'):
+                        for grupa in grupy:
+                            if grupa.get('kod_grupy') == grupa_db.get('kod_grupy'):
+                                uuid_map[grupa.get('grupa_id')] = grupa_db['id']
+                                grupa['uuid'] = grupa_db['id']
+                                break
 
-        ilosc_zapisanych = len(wynik.data) if hasattr(wynik, 'data') else 0
-        print(f"Zapisano {ilosc_zapisanych} grup do bazy danych.")
-        print(f"Utworzono {len(uuid_map)} mapowań UUID.")
+            ilosc_zapisanych = len(wynik.data) if hasattr(wynik, 'data') else 0
+            print(f"Zapisano {ilosc_zapisanych} grup do bazy danych.")
+            print(f"Utworzono {len(uuid_map)} mapowań UUID.")
 
-        return wynik.data if hasattr(wynik, 'data') else []
+            return wynik.data if hasattr(wynik, 'data') else []
+        else:
+            print("Brak danych grup do zapisania.")
+            return []
 
     except Exception as e:
         print(f"Błąd podczas aktualizacji grup: {e}")
         import traceback
         traceback.print_exc()
         return []
+
+def update_zajecia(grupy_data=None, nauczyciele_data=None):
+    """Pobiera i aktualizuje plany zajęć dla grup i nauczycieli."""
+    from scraper.ics_updater import parse_ics_file, fetch_ics_content
+    import concurrent.futures
+    from tqdm import tqdm
+
+    zajecia_count = 0
+    max_workers = 30  # Zwiększamy liczbę wątków dla szybszego pobierania
+
+    # Funkcja do przetwarzania pojedynczej grupy
+    def process_grupa(grupa):
+        if not grupa.get('uuid') or not grupa.get('link_ics_grupy'):
+            return []
+
+        ics_link = grupa['link_ics_grupy']
+        ics_content = fetch_ics_content(ics_link)
+        if not ics_content:
+            return []
+
+        events = parse_ics_file(ics_content, link_ics_zrodlowy=ics_link)
+        for event in events:
+            event['grupa_id'] = grupa['uuid']
+
+        return events
+
+    # Funkcja do przetwarzania nauczyciela
+    def process_nauczyciel(nauczyciel):
+        if not nauczyciel.get('id') or not nauczyciel.get('link_plan_nauczyciela'):
+            return []
+
+        nauczyciel_id = nauczyciel['link_plan_nauczyciela'].split('ID=')[1] if 'ID=' in nauczyciel['link_plan_nauczyciela'] else None
+        if not nauczyciel_id:
+            return []
+
+        ics_link = f"{BASE_URL}nauczyciel_ics.php?ID={nauczyciel_id}&KIND=NT"
+        ics_content = fetch_ics_content(ics_link)
+        if not ics_content:
+            return []
+
+        events = parse_ics_file(ics_content, link_ics_zrodlowy=ics_link)
+        for event in events:
+            event['nauczyciel_id'] = nauczyciel['id']
+
+        return events
+
+    try:
+        # Przetwarzanie grup równolegle w partiach
+        if grupy_data:
+            print(f"Pobieranie planów zajęć dla {len(grupy_data)} grup...")
+
+            # Dzielimy na mniejsze porcje żeby lepiej zarządzać pamięcią
+            batch_size = 100
+            for i in range(0, len(grupy_data), batch_size):
+                current_batch = grupy_data[i:i+batch_size]
+                all_events = []
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(process_grupa, grupa): grupa for grupa in current_batch}
+
+                    for future in tqdm(concurrent.futures.as_completed(futures),
+                                      total=len(futures),
+                                      desc=f"Pobieranie planów grup {i+1}-{i+len(current_batch)} z {len(grupy_data)}"):
+                        events = future.result()
+                        all_events.extend(events)
+
+                batch_count = save_events_batch(all_events, source_type='grupa')
+                zajecia_count += batch_count
+
+        # Przetwarzanie nauczycieli równolegle w partiach
+        if nauczyciele_data:
+            print(f"Pobieranie planów zajęć dla {len(nauczyciele_data)} nauczycieli...")
+
+            # Dzielimy na mniejsze porcje żeby lepiej zarządzać pamięcią
+            batch_size = 100
+            for i in range(0, len(nauczyciele_data), batch_size):
+                current_batch = nauczyciele_data[i:i+batch_size]
+                all_events = []
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(process_nauczyciel, n): n for n in current_batch}
+
+                    for future in tqdm(concurrent.futures.as_completed(futures),
+                                      total=len(futures),
+                                      desc=f"Pobieranie planów nauczycieli {i+1}-{i+len(current_batch)} z {len(nauczyciele_data)}"):
+                        events = future.result()
+                        all_events.extend(events)
+
+                batch_count = save_events_batch(all_events, source_type='nauczyciel')
+                zajecia_count += batch_count
+
+        print(f"Zakończono pobieranie planów zajęć. Zapisano {zajecia_count} zajęć.")
+        return zajecia_count
+
+    except Exception as e:
+        print(f"Błąd podczas aktualizacji planów zajęć: {e}")
+        import traceback
+        traceback.print_exc()
+        return 0

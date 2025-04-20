@@ -4,10 +4,11 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from supabase import create_client
 
-from scraper.db import update_kierunki, update_grupy, update_nauczyciele
+from scraper.db import update_kierunki, update_grupy, update_nauczyciele, update_zajecia
 from scraper.downloader import fetch_page
 from scraper.parsers.grupy_parser import wyodrebnij_semestr_i_tryb
 from scraper.scrapers.grupy_scraper import scrape_grupy_for_kierunki
+from scraper.scrapers.kierunki_scraper import scrape_kierunki
 
 load_dotenv()
 
@@ -37,7 +38,9 @@ def pobierz_semestr_i_tryb_z_grupy(url: str, verbose=False):
 def main():
     """Główna funkcja wykonująca cały proces scrapowania danych."""
     print("ETAP 1: Pobieranie kierunków studiów...")
-    kierunki = update_kierunki()
+    # Najpierw pobieramy kierunki, a potem je aktualizujemy
+    kierunki_pobrane = scrape_kierunki()
+    kierunki = update_kierunki(kierunki_pobrane)
     print(f"Przetworzono {len(kierunki)} kierunków")
 
     print("\nETAP 2: Pobieranie grup dla kierunków...")
@@ -59,11 +62,11 @@ def main():
     print(f"Przetworzono {len(nauczyciele)} nauczycieli")
 
     print("\nETAP 5: Pobieranie planów zajęć...")
-    # Tu można dodać funkcję do aktualizacji planów zajęć
+    # Wywołanie istniejącej funkcji update_zajecia
+    ilosc_zajec = update_zajecia(grupy, nauczyciele)
+    print(f"Przetworzono {ilosc_zajec} zajęć")
 
     print("\nZakończono cały proces scrapowania i zapisu do bazy danych.")
 
 if __name__ == "__main__":
     main()
-
-
