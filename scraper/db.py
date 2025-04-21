@@ -11,6 +11,16 @@ from tqdm import tqdm
 import postgrest.exceptions
 from scraper.ics_updater import BASE_URL
 
+def bezpieczny_log(tekst):
+        """Filtruje i ogranicza długość tekstu wyświetlanego w logach."""
+        try:
+            tekst_str = str(tekst)
+            if len(tekst_str) > 500:
+                return tekst_str[:500] + "..."
+            return tekst_str
+        except:
+            return "[Nieczytelna zawartość]"
+
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -223,71 +233,62 @@ def save_events(events, source_type=None):
     print(f"Dodano {dodane} nowych zajęć, zaktualizowano {zaktualizowane} istniejących\n")
     return dodane + zaktualizowane
 
-def save_events_batch(events, source_type=None, batch_size=200):
-    """Wsadowo zapisuje zajęcia do bazy danych."""
+def save_events_batch(events, source_type='grupa'):
+    """Zapisuje partię wydarzeń do bazy danych z obsługą duplikatów."""
     if not events:
         return 0
 
-    saved_count = 0
-    batches = [events[i:i+batch_size] for i in range(0, len(events), batch_size)]
-    print(f"Zapisywanie {len(events)} zajęć w {len(batches)} partiach...")
+    try:
+        # Przygotuj dane do wstawienia
+        batch_data = []
+        for event in events:
+            batch_data.append({
+                'uid': event.get('uid'),
+                'start_time': event.get('od'),
+                'end_time': event.get('do_'),
+                'summary': event.get('przedmiot', ''),
+                'location': event.get('miejsce', ''),
+                'description': event.get('description', ''),
+                'przedmiot': event.get('przedmiot', ''),
+                'nauczyciel': event.get('nauczyciel', ''),
+                'rodzaj': event.get('rz', ''),
+                'podgrupa': event.get('podgrupa', ''),
+                'source_ics_url': event.get('link_ics_zrodlowy', '')
+            })
 
-    for i, batch in enumerate(batches):
-        try:
-            # Przygotowanie danych zgodnie ze strukturą tabeli
-            zajecia_data = []
-            for event in batch:
-                zajecia_data.append({
-                    'przedmiot': event.get('przedmiot'),
-                    'od': event.get('od'),
-                    'do_': event.get('do_'),
-                    'miejsce': event.get('miejsce'),
-                    'rz': event.get('rz'),
-                    'podgrupa': event.get('podgrupa'),
-                    'uid': event.get('uid'),
-                    'link_ics_zrodlowy': event.get('link_ics_zrodlowy'),
-                    'source_type': source_type
-                })
+        # Użyj upsert z klientem Supabase
+        result = supabase.table('zajecia').upsert(batch_data).execute()
 
-            # Wsadowy upsert
-            wynik = supabase.table('zajecia').upsert(zajecia_data).execute()
+        # Pobierz mapowanie UID -> ID po zapisaniu zajęć
+        uids = [event.get('uid') for event in events if event.get('uid')]
+        if uids:
+            uid_mapping_result = supabase.table('zajecia').select('id,uid').in_('uid', uids).execute()
+            uid_to_id = {item['uid']: item['id'] for item in uid_mapping_result.data if 'uid' in item}
 
-            if wynik.data:
-                # Przygotowanie relacji grupowych
-                relacje_grupy = []
-                relacje_nauczyciele = []
+            # Dodaj powiązania grupa/nauczyciel używając PRAWIDŁOWEGO ID
+            for event in events:
+                uid = event.get('uid')
+                if not uid or uid not in uid_to_id:
+                    continue
 
-                for j, zajecie in enumerate(wynik.data):
-                    event = batch[j]
-                    zajecie_id = zajecie['id']
+                zajecia_id = uid_to_id[uid]
 
-                    # Relacja zajęcia-grupy
-                    if source_type == 'grupa' and 'grupa_id' in event:
-                        relacje_grupy.append({
-                            'zajecia_id': zajecie_id,
-                            'grupa_id': event['grupa_id']
-                        })
+                if source_type == 'grupa' and 'grupa_id' in event:
+                    supabase.table('zajecia_grupy').upsert({
+                        'zajecia_id': zajecia_id,  # teraz używamy prawidłowego ID
+                        'grupa_id': event.get('grupa_id')
+                    }).execute()
+                elif source_type == 'nauczyciel' and 'nauczyciel_id' in event:
+                    supabase.table('zajecia_nauczyciele').upsert({
+                        'zajecia_id': zajecia_id,  # teraz używamy prawidłowego ID
+                        'nauczyciel_id': event.get('nauczyciel_id')
+                    }).execute()
 
-                    # Relacja zajęcia-nauczyciele
-                    elif source_type == 'nauczyciel' and 'nauczyciel_id' in event:
-                        relacje_nauczyciele.append({
-                            'zajecia_id': zajecie_id,
-                            'nauczyciel_id': event['nauczyciel_id']
-                        })
-
-                # Wsadowy zapis relacji
-                if relacje_grupy:
-                    supabase.table('zajecia_grupy').upsert(relacje_grupy).execute()
-
-                if relacje_nauczyciele:
-                    supabase.table('zajecia_nauczyciele').upsert(relacje_nauczyciele).execute()
-
-                saved_count += len(wynik.data)
-                print(f"Zapisano partię {i+1}/{len(batches)} ({len(wynik.data)} zajęć)")
-        except Exception as e:
-            print(f"Błąd zapisywania partii {i+1}: {e}")
-
-    return saved_count
+        print(f"Zapisano {len(batch_data)} zajęć (aktualizacja lub dodanie)")
+        return len(batch_data)
+    except Exception as e:
+        print(f"Błąd zapisywania partii: {bezpieczny_log(e)}")
+        return 0
 
 def update_kierunki(kierunki):
     """Aktualizuje informacje o kierunkach w bazie danych."""

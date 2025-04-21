@@ -43,6 +43,29 @@ def get_session():
     return _session
 
 
+def bezpieczny_log(tekst):
+    """Wypisuje logi, filtrując potencjalne znaki binarne/HTML."""
+    # Jeśli to obiekt odpowiedzi HTTP, nie wyświetlaj treści
+    if isinstance(tekst, requests.Response):
+        return f"[Odpowiedź HTTP: {tekst.status_code}]"
+
+    # Konwersja do stringa z obsługą błędów kodowania
+    try:
+        tekstowy = str(tekst)
+    except Exception:
+        return "[Nieczytelna zawartość]"
+
+    # Usuń tagi HTML i znaki niedrukowalne
+    filtrowany_tekst = re.sub(r'<[^>]*>', '', tekstowy)
+    filtrowany_tekst = ''.join(c if c.isprintable() else ' ' for c in filtrowany_tekst)
+
+    # Limit długości loga
+    if len(filtrowany_tekst) > 500:
+        filtrowany_tekst = filtrowany_tekst[:500] + "..."
+
+    return filtrowany_tekst
+
+
 def fetch_ics_content(url, max_retries=3, retry_delay=5):
     """Pobiera zawartość pliku ICS z podanego URL z mechanizmem ponownych prób."""
     session = get_session()
@@ -50,15 +73,32 @@ def fetch_ics_content(url, max_retries=3, retry_delay=5):
     for attempt in range(max_retries):
         try:
             response = session.get(url, timeout=30)
+            response.encoding = 'utf-8'  # Ustaw kodowanie
+
             if response.status_code == 200:
-                return response.text
+                content = response.text.strip()
+
+                # Sprawdź czy odpowiedź to faktycznie plik ICS
+                if content.startswith("BEGIN:VCALENDAR"):
+                    return content
+                elif content.lower().startswith("<!doctype html") or content.lower().startswith("<html"):
+                    print(f"Zwrócony HTML zamiast ICS: {url}\n")
+                    return None
+                else:
+                    # Jeśli to ani ICS, ani HTML, zapisz pierwsze 100 znaków
+                    print(f"Nieznany format odpowiedzi: {bezpieczny_log(content[:100])} - {url}")
+                    return None
             elif response.status_code == 404:
                 print(f"Brak pliku ICS: {url}")
                 return None
             else:
                 print(f"Błąd pobierania pliku ICS: {response.status_code} - {url}")
+                if attempt < max_retries - 1:
+                    print(f"Ponowna próba za {retry_delay} sekund...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Zwiększaj opóźnienie przy każdej próbie
         except Exception as e:
-            print(f"Próba {attempt + 1}/{max_retries}: Błąd pobierania ICS ({url}): {e}")
+            print(f"Próba {attempt + 1}/{max_retries}: Błąd pobierania ICS ({url}): {bezpieczny_log(e)}")
             if attempt < max_retries - 1:
                 print(f"Ponowna próba za {retry_delay} sekund...")
                 time.sleep(retry_delay)
@@ -69,7 +109,6 @@ def fetch_ics_content(url, max_retries=3, retry_delay=5):
                 session = _session
 
     return None
-
 
 def parse_ics_file(ics_content, link_ics_zrodlowy=None):
     """Parsuje plik ICS i zwraca listę wydarzeń (zajęć)."""
@@ -148,6 +187,7 @@ def parse_ics_file(ics_content, link_ics_zrodlowy=None):
 
     return events
 
+
 def pobierz_plan_ics_grupy(grupa_id):
     """Pobiera plan grupy w formacie ICS."""
     ics_link = f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG"
@@ -168,22 +208,32 @@ def pobierz_plan_ics_nauczyciela(nauczyciel_id):
     Pobiera plan nauczyciela w formacie ICS,
     najpierw sprawdzając czy plan HTML istnieje.
     """
-    # Najpierw sprawdź czy istnieje plan HTML
     html_link = f"{BASE_URL}nauczyciel_plan.php?ID={nauczyciel_id}"
     session = get_session()
-
     ics_link = f"{BASE_URL}nauczyciel_ics.php?ID={nauczyciel_id}&KIND=NT"
 
     try:
         html_response = session.get(html_link, timeout=10)
+        html_response.encoding = 'utf-8'  # Ustaw kodowanie
 
-        # Jeśli plan HTML nie istnieje, nie ma sensu próbować pobierać ICS
         if html_response.status_code == 404:
             return {
                 'nauczyciel_id': nauczyciel_id,
                 'ics_content': None,
                 'link_ics_zrodlowy': ics_link,
                 'status': 'not_found',
+                'data_aktualizacji': datetime.datetime.now().isoformat()
+            }
+
+        # Sprawdź nagłówek strony - bezpieczniejsze sprawdzenie
+        page_start = html_response.text[:200] if html_response.text else ""
+
+        if "<title>Plan zajęć nauczyciela" not in page_start:
+            return {
+                'nauczyciel_id': nauczyciel_id,
+                'ics_content': None,
+                'link_ics_zrodlowy': ics_link,
+                'status': 'no_plan',
                 'data_aktualizacji': datetime.datetime.now().isoformat()
             }
 
@@ -209,13 +259,23 @@ def pobierz_plan_ics_nauczyciela(nauczyciel_id):
                 'data_aktualizacji': datetime.datetime.now().isoformat()
             }
 
-        # Sprawdź treść
+        # Sprawdź poprawność formatu ICS
         if not ics_content.strip():
             return {
                 'nauczyciel_id': nauczyciel_id,
                 'ics_content': None,
                 'link_ics_zrodlowy': ics_link,
                 'status': 'empty',
+                'data_aktualizacji': datetime.datetime.now().isoformat()
+            }
+
+        # Dodatkowe sprawdzenie czy to na pewno ICS a nie HTML
+        if not ics_content.startswith('BEGIN:VCALENDAR'):
+            return {
+                'nauczyciel_id': nauczyciel_id,
+                'ics_content': None,
+                'link_ics_zrodlowy': ics_link,
+                'status': 'invalid_ics',
                 'data_aktualizacji': datetime.datetime.now().isoformat()
             }
 
@@ -228,12 +288,13 @@ def pobierz_plan_ics_nauczyciela(nauczyciel_id):
         }
 
     except Exception as e:
+        safe_error = bezpieczny_log(e)
         return {
             'nauczyciel_id': nauczyciel_id,
             'ics_content': None,
             'link_ics_zrodlowy': ics_link,
             'status': 'error',
-            'error': str(e),
+            'error': safe_error,
             'data_aktualizacji': datetime.datetime.now().isoformat()
         }
 
