@@ -1,165 +1,140 @@
-"""
-Moduł do pobierania informacji o grupach studenckich z planu UZ.
-"""
-import concurrent.futures
-import datetime
-import requests
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from scraper.downloader import fetch_page, BASE_URL
+from scraper.parsers.grupy_parser import parsuj_html_grupa
 
 try:
     from tqdm import tqdm
 except ImportError:
-    print("⚠️ Pakiet tqdm nie jest zainstalowany. Instalacja: pip install tqdm")
     def tqdm(iterable, **kwargs):
-        print(kwargs.get("desc", "Przetwarzanie..."))
         return iterable
 
-from scraper.downloader import fetch_page, BASE_URL
-from scraper.parsers.grupy_parser import parsuj_html_grupa  # Używamy aliasu zamiast parse_grupa_details
-from scraper.ics_updater import aktualizuj_plany_grup
-
-def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id):
-    """Parsuje grupy z HTML strony kierunku."""
-    soup = BeautifulSoup(html, 'html.parser')
-    grupy = []
-
-    try:
-        # Znajdź informację o semestrze w nagłówku H3
-        semestr = "nieznany"
-        h3_tags = soup.find_all("h3")
-        for h3 in h3_tags:
-            text = h3.text.lower()
-            if "semestr letni" in text:
-                semestr = "letni"
+def find_semester_ics_links(html_grupy, allow_fallback_gg=True):
+    """
+    Zwraca listę krotek (link_ics, semestr), gdzie semestr to "letni", "zimowy" lub None.
+    Jeśli allow_fallback_gg=True, dopuszcza link bez &S=, ale TYLKO gdy nie ma żadnego semestralnego.
+    """
+    soup = BeautifulSoup(html_grupy, "html.parser")
+    links = []
+    # Najpierw zbierz semestralne linki
+    for a in soup.find_all('a', href=True):
+        href = a['href']
+        if 'grupy_ics.php' in href and ('&S=0' in href or '&S=1' in href):
+            full_link = href if href.startswith('http') else BASE_URL + href.lstrip('/')
+            # Spróbuj znaleźć semestr
+            semestr = None
+            parent_li = a.find_parent('li')
+            if parent_li:
+                header = parent_li.find_previous('li', class_="dropdown-header")
+                if header and "letni" in header.text.lower():
+                    semestr = "letni"
+                elif header and "zimowy" in header.text.lower():
+                    semestr = "zimowy"
+            if not semestr:
+                if '&S=0' in href:
+                    semestr = "letni"
+                elif '&S=1' in href:
+                    semestr = "zimowy"
+            links.append((full_link, semestr))
+    # Jeśli nie znalazłeś żadnego semestralnego, użyj fallback tylko GG (bez &S=)
+    if allow_fallback_gg and not links:
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            if 'grupy_ics.php' in href and '&KIND=GG' in href and '&S=' not in href:
+                full_link = href if href.startswith('http') else BASE_URL + href.lstrip('/')
+                links.append((full_link, None)) # None = nieznany semestr
+                print("⚠️ Tymczasowy fallback: dodano link ICS bez S=0/S=1 (tylko GG), do usunięcia w przyszłości!")
                 break
-            elif "semestr zimowy" in text:
-                semestr = "zimowy"
-                break
+    return links
 
-        # Znajdź wszystkie wiersze tabeli z linkami do grup
-        rows = soup.select("tr.odd td a, tr.even td a")
 
-        for row in rows:
-            link = row.get('href')
-            kod_grupy = row.text.strip()
-
-            if not link or not kod_grupy:
-                continue
-
-            # Tryb studiów - potrzebujemy go wyciągnąć z nagłówka H3
-            tryb_studiow = "nieznany"
-            for h3 in h3_tags:
-                text = h3.text.lower()
-                if "stacjonarne" in text:
-                    tryb_studiow = "stacjonarne"
-                    break
-                elif "niestacjonarne" in text:
-                    tryb_studiow = "niestacjonarne"
-                    break
-
-            # Przygotuj pełne URL do planu grupy
-            full_link = f"{BASE_URL}{link}" if link and not link.startswith('http') else link
-
-            # Wydobycie ID grupy z linku
-            grupa_id = None
-            if "ID=" in link:
-                try:
-                    grupa_id = link.split("ID=")[1].split("&")[0]
-                except (IndexError, ValueError):
-                    pass
-
-            # Generuj link do pliku ICS
-            ics_link = f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG" if grupa_id else None
-
-            if grupa_id:
-                grupa = {
-                    'grupa_id': grupa_id,
-                    'kod_grupy': kod_grupy,
-                    'kierunek_id': kierunek_id,
-                    'wydzial': wydzial,
-                    'tryb_studiow': tryb_studiow,
-                    'semestr': semestr,
-                    'link_grupy': full_link,
-                    'link_ics_grupy': ics_link
-                }
-                grupy.append(grupa)
-
-        return grupy
-    except Exception as e:
-        print(f"❌ Błąd parsowania grup: {e}")
+def parse_grupa_with_fetch(link, nazwa_kierunku, wydzial, kierunek_id):
+    html_grupy = fetch_page(link)
+    if not html_grupy:
+        return []
+    szczegoly = parsuj_html_grupa(html_grupy)
+    kod_grupy = szczegoly.get('kod_grupy', '')
+    tryb_studiow = szczegoly.get('tryb_studiow')
+    sem_ics_links = find_semester_ics_links(html_grupy)
+    if not sem_ics_links:
         return []
 
-def scrape_grupy_for_kierunki(kierunki, verbose=True):
-    """Scrapuje grupy dla podanych kierunków."""
+    # WYCIĄGNIJ grupa_id Z LINKU!
+    import re
+    m = re.search(r'ID=(\d+)', link)
+    grupa_id = m.group(1) if m else None
+
+    grupy = []
+    for ics_link, semestr in sem_ics_links:
+        if kod_grupy and (semestr in ("letni", "zimowy") or semestr is None):
+            grupy.append({
+                'grupa_id': grupa_id,  # <-- DODANE!
+                'kod_grupy': kod_grupy,
+                'kierunek_id': kierunek_id,
+                'semestr': semestr,
+                'tryb_studiow': tryb_studiow,
+                'link_grupy': link,
+                'link_ics_grupy': ics_link,
+                'kierunek_nazwa': nazwa_kierunku
+            })
+    return grupy
+
+def parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id, max_workers=10):
+    soup = BeautifulSoup(html, 'html.parser')
+    table = soup.find("table", class_="table-bordered")
+    if not table:
+        print(f"⚠️ Brak grup na stronie kierunku: {nazwa_kierunku}")
+        return []
+    all_links = []
+    for row in table.find_all("tr"):
+        td = row.find("td")
+        if not td:
+            continue
+        a = td.find("a")
+        if not a:
+            continue
+        grupa_href = a.get("href")
+        if not grupa_href:
+            continue
+        full_link = f"{BASE_URL}{grupa_href}" if not grupa_href.startswith('http') else grupa_href
+        all_links.append(full_link)
+    grupy = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(parse_grupa_with_fetch, link, nazwa_kierunku, wydzial, kierunek_id)
+            for link in all_links
+        ]
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Grupy"):
+            grupy.extend(future.result())
+    return grupy
+
+def remove_duplicates(grupy):
+    seen = set()
+    unique = []
+    for g in grupy:
+        key = (g['kod_grupy'], g['kierunek_id'], g['semestr'])
+        if key not in seen:
+            unique.append(g)
+            seen.add(key)
+    return unique
+
+def scrape_grupy_for_kierunki(kierunki, verbose=True, max_workers=10):
     wszystkie_grupy = []
-
-    for kierunek in kierunki:
+    for kierunek in tqdm(kierunki, desc="Kierunki"):
         if verbose:
-            print(f"Pobieranie grup dla kierunku: {kierunek.get('nazwa_kierunku')}")
-
-        link_kierunku = kierunek.get('link_strony_kierunku')
+            print(f"Pobieram grupy dla kierunku: {getattr(kierunek, 'nazwa_kierunku', None) or kierunek.get('nazwa_kierunku')}")
+        link_kierunku = getattr(kierunek, 'link_strony_kierunku', None) or kierunek.get('link_strony_kierunku')
+        wydzial = getattr(kierunek, 'wydzial', None) or kierunek.get('wydzial')
+        nazwa_kierunku = getattr(kierunek, 'nazwa_kierunku', None) or kierunek.get('nazwa_kierunku')
+        kierunek_id = getattr(kierunek, 'kierunek_id', None) or kierunek.get('kierunek_id') or kierunek.get('id')
         if not link_kierunku:
             continue
-
-        try:
-            response = requests.get(link_kierunku)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            # Znajdujemy linki do grup
-            grupy_links = soup.find_all('a', href=lambda href: href and 'grupy_plan.php?ID=' in href)
-
-            for link in grupy_links:
-                href = link.get('href', '')
-                link_text = link.text.strip()
-
-                # Wyciągamy tryb studiów bezpośrednio z tekstu linku
-                tryb_studiow = "nieznany"
-                if "niestacjonarne" in link_text.lower():
-                    tryb_studiow = "niestacjonarne"
-                elif "stacjonarne" in link_text.lower():
-                    tryb_studiow = "stacjonarne"
-
-                if 'ID=' in href:
-                    grupa_id = href.split('ID=')[1].split('&')[0]
-                else:
-                    continue
-
-                grupa_url = f"{BASE_URL}{href}"
-                try:
-                    grupa_response = requests.get(grupa_url)
-                    grupa_response.raise_for_status()
-                    grupa_info = parsuj_html_grupa(grupa_response.text)
-
-                    grupa_data = {
-                        'grupa_id': grupa_id,
-                        'kod_grupy': grupa_info['kod_grupy'],
-                        'link_grupy': grupa_url,
-                        'kierunek_id': kierunek.get('id'),
-                        'semestr': grupa_info['semestr'],
-                        'tryb_studiow': tryb_studiow if tryb_studiow != "nieznany" else grupa_info['tryb_studiow'],
-                        'link_ics_grupy': f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG"
-                    }
-                    wszystkie_grupy.append(grupa_data)
-
-                except Exception as e:
-                    if verbose:
-                        print(f"  Błąd pobierania szczegółów grupy {grupa_id}: {e}")
-                    # Awaryjnie użyj podstawowych danych
-                    grupa_data = {
-                        'grupa_id': grupa_id,
-                        'kod_grupy': link_text,
-                        'link_grupy': grupa_url,
-                        'kierunek_id': kierunek.get('id'),
-                        'tryb_studiow': tryb_studiow,
-                        'link_ics_grupy': f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG"
-                    }
-                    wszystkie_grupy.append(grupa_data)
-
-        except Exception as e:
-            print(f"Błąd podczas pobierania grup dla kierunku: {e}")
-
+        html = fetch_page(link_kierunku)
+        if not html:
+            continue
+        grupy = parse_grupy(html, nazwa_kierunku, wydzial, kierunek_id, max_workers=max_workers)
+        wszystkie_grupy.extend(grupy)
     if verbose:
         print(f"Znaleziono łącznie {len(wszystkie_grupy)} grup")
-
+    wszystkie_grupy = remove_duplicates(wszystkie_grupy)
     return wszystkie_grupy

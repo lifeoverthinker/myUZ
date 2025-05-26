@@ -1,61 +1,74 @@
-# Pobieranie plików .ics
-import requests
+import aiohttp
+import asyncio
 import time
-from functools import lru_cache
+
+from scraper.utils import fetch_page
 
 BASE_URL = "https://plan.uz.zgora.pl/"
 
-def fetch_page(url: str) -> str:
-    """Pobiera zawartość strony HTML."""
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        return response.text
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Błąd pobierania strony: {e}")
-        return ""
-
-@lru_cache(maxsize=500)
-def fetch_page_cached(url: str) -> str:
-    """Cachowana wersja fetch_page dla zwiększenia wydajności."""
-    return fetch_page(url)
-
-def fetch_page_with_retry(url: str, max_retries=3, delay=1) -> str:
-    """Pobiera stronę z mechanizmem ponawiania."""
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            return response.text
-        except Exception as e:
-            if attempt < max_retries - 1:
-                print(f"⚠️ Próba {attempt+1}/{max_retries} nieudana: {e}. Ponawianie za {delay}s...")
-                time.sleep(delay)
-                delay *= 2  # Wykładnicze opóźnienie
-            else:
-                print(f"❌ Wszystkie próby nieudane: {e}")
-                return ""
-
-
-def download_ics(url, max_retries=3):
-    """Pobiera plik ICS z podanego URL z obsługą błędów."""
-    retries = 0
-    while retries < max_retries:
-        try:
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                # Sprawdź czy to faktycznie plik ICS, a nie strona HTML
-                content = response.text.strip()
-                if content.startswith('BEGIN:VCALENDAR'):
-                    return content
+async def fetch_ics_with_fallback(session: aiohttp.ClientSession, grupa_id: str, max_retries: int = 3) -> dict:
+    """
+    Próbuj pobrać ICS dla grupy w kolejności:
+    1. ...&S=0 (zimowy)
+    2. ...&S=1 (letni)
+    3. bez &S (aktualny lub ogólny)
+    Zwraca dict: {'status', 'ics_content', 'link_ics_zrodlowy', 'grupa_id'}
+    """
+    urls = [
+        f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG&S=0",
+        f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG&S=1",
+        f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG"
+    ]
+    for url in urls:
+        for attempt in range(max_retries):
+            try:
+                async with session.get(url, timeout=15) as resp:
+                    if resp.status == 200:
+                        text = await resp.text()
+                        if text.strip().startswith("BEGIN:VCALENDAR"):
+                            return {
+                                'status': 'success',
+                                'ics_content': text,
+                                'link_ics_zrodlowy': url,
+                                'grupa_id': grupa_id
+                            }
+                        else:
+                            break  # To nie jest plik ICS
+                    elif resp.status == 404:
+                        break  # przejdź do kolejnego url
+                    else:
+                        await asyncio.sleep(1)
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1)
                 else:
-                    raise Exception("URL nie zwraca pliku ICS, tylko HTML — prawdopodobnie zły link.")
-            else:
-                raise Exception(f"Błąd HTTP: {response.status_code}")
-        except Exception as e:
-            retries += 1
-            if retries < max_retries:
-                print(f"Próba {retries}/{max_retries} nie powiodła się: {e}. Ponawianie...")
-                time.sleep(1)
-            else:
-                raise Exception(f"Po {max_retries} próbach nie udało się pobrać pliku ICS: {e}")
+                    continue
+    # Jeśli żaden nie istnieje:
+    return {
+        'status': 'not_found',
+        'ics_content': None,
+        'link_ics_zrodlowy': urls[-1],
+        'grupa_id': grupa_id
+    }
+
+async def fetch_all_ics(grupa_ids: list[str], max_concurrent: int = 20) -> list[dict]:
+    """
+    Asynchronicznie pobiera ICSy dla wszystkich grup.
+    """
+    results = []
+    sema = asyncio.Semaphore(max_concurrent)
+    async with aiohttp.ClientSession() as session:
+        async def limited_fetch(grupa_id):
+            async with sema:
+                return await fetch_ics_with_fallback(session, grupa_id)
+        tasks = [limited_fetch(grupa_id) for grupa_id in grupa_ids]
+        for fut in asyncio.as_completed(tasks):
+            result = await fut
+            results.append(result)
+    return results
+
+def download_ics_for_groups_async(grupa_ids: list[str]) -> list[dict]:
+    """
+    Wywołuje asynchroniczny fetch dla wszystkich grup.
+    """
+    return asyncio.run(fetch_all_ics(grupa_ids))

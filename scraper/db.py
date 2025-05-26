@@ -1,612 +1,221 @@
-# Połączenie i zapis do Supabase
-
 from dotenv import load_dotenv
 import os
 from supabase import create_client
-from scraper.scrapers.kierunki_scraper import scrape_kierunki
-from scraper.scrapers.grupy_scraper import scrape_grupy_for_kierunki
-from scraper.parsers.nauczyciel_parser import scrape_nauczyciele_from_grupy
-import datetime
-from tqdm import tqdm
-import postgrest.exceptions
-from scraper.ics_updater import BASE_URL
+from dataclasses import asdict, is_dataclass
+from typing import Dict, Any, List, Optional, Set, Tuple
 
-def bezpieczny_log(tekst):
-        """Filtruje i ogranicza długość tekstu wyświetlanego w logach."""
-        try:
-            tekst_str = str(tekst)
-            if len(tekst_str) > 500:
-                return tekst_str[:500] + "..."
-            return tekst_str
-        except:
-            return "[Nieczytelna zawartość]"
-
+# Wczytaj zmienne środowiskowe
 load_dotenv()
-
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
+def get_uuid_map(table: str, key_col: str, id_col: str) -> Dict[str, str]:
+    """
+    Uniwersalna funkcja mapująca wartości kluczowe na UUID z dowolnej tabeli.
+    """
+    result = supabase.table(table).select(f"{key_col}, {id_col}").execute()
+    return {row[key_col]: row[id_col] for row in result.data}
 
-def _utworz_powiazanie_nauczyciel_grupa(nauczyciel_id, grupa_id, uuid_map=None):
-    """Tworzy powiązanie nauczyciel-grupa używając poprawnego UUID."""
-    try:
-        # Sprawdź czy grupa_id to UUID czy oryginalny ID liczbowy
-        if uuid_map and grupa_id in uuid_map:
-            grupa_uuid = uuid_map[grupa_id]
-        else:
-            grupa_uuid = grupa_id  # Zakładamy, że to już UUID
-
-        relacja_data = {
-            'nauczyciel_id': nauczyciel_id,
-            'grupa_id': grupa_uuid
-        }
-
-        supabase.table('nauczyciele_grupy').insert(relacja_data).execute()
-        return True
-    except Exception as e:
-        print(f"⚠️ Nie udało się utworzyć powiązania nauczyciel-grupa: {e}")
-        return False
-
-def _utworz_powiazania_zajecia(zajecia_data, events):
-    """Tworzy powiązania zajęć z grupami i nauczycielami."""
-    try:
-        for i, zajecie in enumerate(zajecia_data):
-            zajecie_id = zajecie['id']
-            event = events[i]
-
-            # Powiązanie z grupą
-            if 'grupa_id' in event and event['grupa_id']:
-                supabase.table('zajecia_grupy').insert({
-                    'zajecia_id': zajecie_id,
-                    'grupa_id': event['grupa_id']
-                }).execute()
-
-            # Powiązanie z nauczycielem
-            if 'nauczyciel_id' in event and event['nauczyciel_id']:
-                supabase.table('zajecia_nauczyciele').insert({
-                    'zajecia_id': zajecie_id,
-                    'nauczyciel_id': event['nauczyciel_id']
-                }).execute()
-    except Exception as e:
-        print(f"⚠️ Błąd podczas tworzenia powiązań zajęć: {e}")
-
+def chunks(lst: List[Any], n: int):
+    """Dzieli listę na kawałki po n elementów."""
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
 
 def save_kierunki(kierunki):
-    """Zapisuje kierunki do bazy danych metodą wsadową."""
     if not kierunki:
         return []
-
-    # Przygotuj dane w formacie do wsadowego dodania
     batch_data = []
     for kierunek in kierunki:
-        # Synchronizacja nazw pól
-        if 'link_kierunku' in kierunek and 'link_strony_kierunku' not in kierunek:
-            kierunek['link_strony_kierunku'] = kierunek.pop('link_kierunku')
-
+        if is_dataclass(kierunek):
+            kierunek = asdict(kierunek)
         batch_data.append({
+            'kierunek_id': kierunek.get('kierunek_id'),
             'nazwa_kierunku': kierunek.get('nazwa_kierunku'),
             'wydzial': kierunek.get('wydzial'),
-            'link_strony_kierunku': kierunek.get('link_strony_kierunku')
+            'link_strony_kierunku': kierunek.get('link_strony_kierunku'),
+            'czy_podyplomowe': kierunek.get('czy_podyplomowe', False)
         })
-
     try:
-        # Wsadowe dodanie kierunków
-        result = supabase.table('kierunki').insert(batch_data).execute()
-
-        # Przypisz ID z powrotem do obiektów kierunków
-        if result.data:
-            for i, kierunek_db in enumerate(result.data):
-                if i < len(kierunki):
-                    kierunki[i]['id'] = kierunek_db['id']
-
-        print(f"✅ Dodano wsadowo {len(batch_data)} kierunków")
+        supabase.table('kierunki').upsert(batch_data, on_conflict='kierunek_id').execute()
+        print(f"✅ Upsertowano {len(batch_data)} kierunków")
         return kierunki
     except Exception as e:
-        print(f"❌ Błąd podczas zapisywania kierunków: {e}")
+        print(f"❌ Błąd podczas upsertowania kierunków: {e}")
         return []
 
+def remove_duplicates_grupy(grupy):
+    seen = set()
+    unique = []
+    for g in grupy:
+        key = (g.get('kod_grupy'), g.get('kierunek_id'))
+        if key not in seen:
+            seen.add(key)
+            unique.append(g)
+    return unique
 
-def save_nauczyciele(nauczyciele):
-    """Zapisuje nauczycieli do bazy danych metodą wsadową."""
-    if not nauczyciele:
-        return []
-
-    try:
-        # Przygotuj dane nauczycieli
-        nauczyciele_data = []
-        for nauczyciel in nauczyciele:
-            nauczyciele_data.append({
-                'imie_nazwisko': nauczyciel.get('imie_nazwisko'),
-                'instytut': nauczyciel.get('instytut'),
-                'email': nauczyciel.get('email'),
-                'link_plan_nauczyciela': nauczyciel.get('link_planu'),  # poprawna nazwa kolumny
-                'link_strony_nauczyciela': nauczyciel.get('link_nauczyciela')  # poprawna nazwa kolumny
-            })
-
-        # Wsadowe dodanie nauczycieli
-        if nauczyciele_data:
-            result = supabase.table('nauczyciele').insert(nauczyciele_data).execute()
-            for i, n_db in enumerate(result.data):
-                if i < len(nauczyciele):
-                    nauczyciele[i]['id'] = n_db['id']
-
-        # Przygotuj relacje nauczyciel-grupa
-        relacje = []
-        for nauczyciel in nauczyciele:
-            if 'id' in nauczyciel and 'grupy_id' in nauczyciel:
-                for grupa_id in nauczyciel['grupy_id']:
-                    relacje.append({
-                        'nauczyciel_id': nauczyciel['id'],
-                        'grupa_id': grupa_id
-                    })
-
-        # Wsadowe dodanie relacji
-        if relacje:
-            supabase.table('nauczyciele_grupy').insert(relacje).execute()
-
-        print(f"✅ Dodano {len(nauczyciele_data)} nauczycieli i {len(relacje)} relacji")
-        return nauczyciele
-    except Exception as e:
-        print(f"❌ Błąd podczas zapisywania nauczycieli: {e}")
-        return []
-
-
-def save_events(events, source_type=None):
-    """Zapisuje wydarzenia (zajęcia) do bazy danych z mechanizmem upsert."""
-    if not events:
-        return 0
-
-    dodane = 0
-    zaktualizowane = 0
-
-    for event in events:
-        try:
-            # Dane do zapisu
-            zajecie_data = {
-                'przedmiot': event.get('przedmiot'),
-                'od': event.get('od'),
-                'do_': event.get('do_'),
-                'miejsce': event.get('miejsce'),
-                'rz': event.get('rz'),
-                'link_ics_zrodlowy': event.get('link_ics_zrodlowy'),
-                'podgrupa': event.get('podgrupa'),
-                'uid': event.get('uid'),
-                'source_type': source_type
-            }
-
-            # Najpierw sprawdź po UID
-            if event.get('uid'):
-                wynik = supabase.table('zajecia').select('id').eq('uid', event['uid']).execute()
-                if wynik.data and len(wynik.data) > 0:
-                    # Aktualizuj istniejące
-                    supabase.table('zajecia').update(zajecie_data).eq('uid', event['uid']).execute()
-                    zaktualizowane += 1
-                    zajecie_id = wynik.data[0]['id']
-                else:
-                    # Dodaj nowe
-                    wynik = supabase.table('zajecia').insert(zajecie_data).execute()
-                    if wynik.data:
-                        zajecie_id = wynik.data[0]['id']
-                        dodane += 1
-                    else:
-                        continue
-            else:
-                # Sprawdź po innych polach
-                wynik = supabase.table('zajecia').select('id')\
-                    .eq('przedmiot', event.get('przedmiot'))\
-                    .eq('od', event.get('od'))\
-                    .eq('do_', event.get('do_'))\
-                    .eq('miejsce', event.get('miejsce'))\
-                    .execute()
-
-                if wynik.data and len(wynik.data) > 0:
-                    # Aktualizuj istniejące
-                    supabase.table('zajecia').update(zajecie_data).eq('id', wynik.data[0]['id']).execute()
-                    zaktualizowane += 1
-                    zajecie_id = wynik.data[0]['id']
-                else:
-                    # Dodaj nowe
-                    wynik = supabase.table('zajecia').insert(zajecie_data).execute()
-                    if wynik.data:
-                        zajecie_id = wynik.data[0]['id']
-                        dodane += 1
-                    else:
-                        continue
-
-            # Dodaj powiązania
-            if source_type == 'grupa' and 'grupa_id' in event:
-                supabase.table('zajecia_grupy').upsert({
-                    'zajecia_id': zajecie_id,
-                    'grupa_id': event['grupa_id']
-                }).execute()
-
-            elif source_type == 'nauczyciel' and 'nauczyciel_id' in event:
-                supabase.table('zajecia_nauczyciele').upsert({
-                    'zajecia_id': zajecie_id,
-                    'nauczyciel_id': event['nauczyciel_id']
-                }).execute()
-
-        except Exception as e:
-            print(f"Błąd zapisywania zajęcia: {e}")
-
-    print(f"Dodano {dodane} nowych zajęć, zaktualizowano {zaktualizowane} istniejących\n")
-    return dodane + zaktualizowane
-
-def save_events_batch(events, source_type='grupa'):
-    """Zapisuje partię wydarzeń do bazy danych z obsługą duplikatów."""
-    if not events:
-        return 0
-
-    try:
-        # Przygotuj dane do wstawienia
-        batch_data = []
-        for event in events:
-            batch_data.append({
-                'uid': event.get('uid'),
-                'start_time': event.get('od'),
-                'end_time': event.get('do_'),
-                'summary': event.get('przedmiot', ''),
-                'location': event.get('miejsce', ''),
-                'description': event.get('description', ''),
-                'przedmiot': event.get('przedmiot', ''),
-                'nauczyciel': event.get('nauczyciel', ''),
-                'rodzaj': event.get('rz', ''),
-                'podgrupa': event.get('podgrupa', ''),
-                'source_ics_url': event.get('link_ics_zrodlowy', '')
-            })
-
-        # Użyj upsert z klientem Supabase
-        result = supabase.table('zajecia').upsert(batch_data).execute()
-
-        # Pobierz mapowanie UID -> ID po zapisaniu zajęć
-        uids = [event.get('uid') for event in events if event.get('uid')]
-        if uids:
-            uid_mapping_result = supabase.table('zajecia').select('id,uid').in_('uid', uids).execute()
-            uid_to_id = {item['uid']: item['id'] for item in uid_mapping_result.data if 'uid' in item}
-
-            # Dodaj powiązania grupa/nauczyciel używając PRAWIDŁOWEGO ID
-            for event in events:
-                uid = event.get('uid')
-                if not uid or uid not in uid_to_id:
-                    continue
-
-                zajecia_id = uid_to_id[uid]
-
-                if source_type == 'grupa' and 'grupa_id' in event:
-                    supabase.table('zajecia_grupy').upsert({
-                        'zajecia_id': zajecia_id,  # teraz używamy prawidłowego ID
-                        'grupa_id': event.get('grupa_id')
-                    }).execute()
-                elif source_type == 'nauczyciel' and 'nauczyciel_id' in event:
-                    supabase.table('zajecia_nauczyciele').upsert({
-                        'zajecia_id': zajecia_id,  # teraz używamy prawidłowego ID
-                        'nauczyciel_id': event.get('nauczyciel_id')
-                    }).execute()
-
-        print(f"Zapisano {len(batch_data)} zajęć (aktualizacja lub dodanie)")
-        return len(batch_data)
-    except Exception as e:
-        print(f"Błąd zapisywania partii: {bezpieczny_log(e)}")
-        return 0
-
-def update_kierunki(kierunki):
-    """Aktualizuje informacje o kierunkach w bazie danych."""
-    try:
-        # Sprawdź czy otrzymaliśmy listę kierunków
-        if not isinstance(kierunki, list):
-            print(f"⚠️ Wykryto pojedynczy obiekt Kierunek zamiast listy, konwertuję na listę.")
-            kierunki = [kierunki] if kierunki else []
-
-        print(f"Aktualizuję informacje o {len(kierunki)} kierunkach...")
-
-        # Sprawdzenie czy lista jest pusta
-        if not kierunki:
-            print("Brak kierunków do zapisania.")
-            return []
-
-        # Pobierz istniejące kierunki z bazy
-        existing_kierunki = supabase.table('kierunki').select('id,nazwa_kierunku,link_strony_kierunku').execute()
-        existing_by_name = {k['nazwa_kierunku']: k['id'] for k in existing_kierunki.data if k['nazwa_kierunku']}
-        existing_by_link = {k['link_strony_kierunku']: k['id'] for k in existing_kierunki.data if k['link_strony_kierunku']}
-
-        # Przygotuj dane do dodania lub aktualizacji
-        to_update = []
-        to_insert = []
-
-        for kierunek in kierunki:
-            nazwa = kierunek.nazwa
-            link = kierunek.link
-
-            # Sprawdź czy kierunek już istnieje
-            existing_id = None
-            if nazwa in existing_by_name:
-                existing_id = existing_by_name[nazwa]
-            elif link in existing_by_link:
-                existing_id = existing_by_link[link]
-
-            if existing_id:
-                # Aktualizuj istniejący rekord
-                to_update.append({
-                    'id': existing_id,
-                    'nazwa_kierunku': nazwa,
-                    'wydzial': kierunek.wydzial,
-                    'link_strony_kierunku': link
-                })
-            else:
-                # Dodaj nowy rekord
-                to_insert.append({
-                    'nazwa_kierunku': nazwa,
-                    'wydzial': kierunek.wydzial,
-                    'link_strony_kierunku': link
-                })
-
-        print(f"Do aktualizacji: {len(to_update)}, do dodania: {len(to_insert)}")
-
-        # Wykonaj aktualizacje
-        updated_records = []
-        if to_update:
-            for record in to_update:
-                result = supabase.table('kierunki').update(record).eq('id', record['id']).execute()
-                if result.data:
-                    updated_records.extend(result.data)
-
-        # Wykonaj wstawianie
-        inserted_records = []
-        if to_insert:
-            result = supabase.table('kierunki').insert(to_insert).execute()
-            if result.data:
-                inserted_records = result.data
-
-        all_records = updated_records + inserted_records
-
-        print(f"Zaktualizowano {len(updated_records)} kierunków, dodano {len(inserted_records)} nowych.")
-
-        return all_records
-
-    except Exception as e:
-        print(f"Błąd podczas aktualizacji kierunków: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
-
-def update_nauczyciele(grupy=None, uuid_map=None):
-    """Aktualizuje nauczycieli z funkcją upsert."""
+def save_grupy(grupy, kierunek_uuid_map, batch_size=1000):
+    """
+    Batchowy upsert grup po (kod_grupy, kierunek_id) – zgodnie z constraintem uniq_grupa!
+    Pole grupa_id zawsze zostaje oryginalnym ID z UZ!
+    """
     if not grupy:
         return []
+    grupy = remove_duplicates_grupy(grupy)
+    total = 0
+    for batch_i, batch in enumerate(chunks(grupy, batch_size), 1):
+        data = []
+        for g in batch:
+            if is_dataclass(g):
+                g = asdict(g)
+            uuid_for_kierunek = kierunek_uuid_map.get(str(g.get('kierunek_id')))
+            data.append({
+                'grupa_id': g.get('grupa_id'),
+                'kod_grupy': g.get('kod_grupy'),
+                'semestr': g.get('semestr'),
+                'tryb_studiow': g.get('tryb_studiow'),
+                'kierunek_id': uuid_for_kierunek,
+                'link_grupy': g.get('link_grupy'),
+                'link_ics_grupy': g.get('link_ics_grupy')
+            })
+        try:
+            supabase.table('grupy').upsert(data, on_conflict='kod_grupy,kierunek_id').execute()
+            total += len(data)
+            print(f"✅ Upsertowano batch {batch_i}: {len(data)} grup (razem: {total})")
+        except Exception as e:
+            print(f"❌ Błąd podczas upsertowania batcha grup: {e}")
+    return total
 
-    nauczyciele = scrape_nauczyciele_from_grupy(grupy)
-
-    # Synchronizacja nazw pól
-    for nauczyciel in nauczyciele:
-        if 'link_planu' in nauczyciel and 'link_plan_nauczyciela' not in nauczyciel:
-            nauczyciel['link_plan_nauczyciela'] = nauczyciel.pop('link_planu')
-        if 'link_nauczyciela' in nauczyciel and 'link_strony_nauczyciela' not in nauczyciel:
-            nauczyciel['link_strony_nauczyciela'] = nauczyciel.pop('link_nauczyciela')
-
-    try:
-        # Pobierz istniejących nauczycieli
-        existing = supabase.table('nauczyciele').select('id,email,imie_nazwisko').execute()
-        email_map = {n['email']: n['id'] for n in existing.data if n['email']}
-        nazwa_map = {n['imie_nazwisko']: n['id'] for n in existing.data if n['imie_nazwisko']}
-
-        to_update = []
-        to_insert = []
-
-        for nauczyciel in nauczyciele:
-            email = nauczyciel.get('email')
-            imie_nazwisko = nauczyciel.get('imie_nazwisko')
-
-            if email and email in email_map:
-                nauczyciel['id'] = email_map[email]
-                to_update.append({
-                    'id': nauczyciel['id'],
-                    'imie_nazwisko': imie_nazwisko,
-                    'instytut': nauczyciel.get('instytut'),
-                    'email': email,
-                    'link_plan_nauczyciela': nauczyciel.get('link_plan_nauczyciela'),
-                    'link_strony_nauczyciela': nauczyciel.get('link_strony_nauczyciela')
-                })
-            elif imie_nazwisko and imie_nazwisko in nazwa_map:
-                nauczyciel['id'] = nazwa_map[imie_nazwisko]
-                to_update.append({
-                    'id': nauczyciel['id'],
-                    'imie_nazwisko': imie_nazwisko,
-                    'instytut': nauczyciel.get('instytut'),
-                    'email': email,
-                    'link_plan_nauczyciela': nauczyciel.get('link_plan_nauczyciela'),
-                    'link_strony_nauczyciela': nauczyciel.get('link_strony_nauczyciela')
-                })
-            else:
-                to_insert.append({
-                    'imie_nazwisko': imie_nazwisko,
-                    'instytut': nauczyciel.get('instytut'),
-                    'email': email,
-                    'link_plan_nauczyciela': nauczyciel.get('link_plan_nauczyciela'),
-                    'link_strony_nauczyciela': nauczyciel.get('link_strony_nauczyciela')
-                })
-
-        # Wykonaj wsadowe operacje
-        if to_insert:
-            insert_result = supabase.table('nauczyciele').insert(to_insert).execute()
-            if insert_result.data:
-                for i, data in enumerate(insert_result.data):
-                    nauczyciel = next((n for n in nauczyciele if
-                                      (n.get('email') not in email_map) and
-                                      (n.get('imie_nazwisko') not in nazwa_map)), None)
-                    if nauczyciel:
-                        nauczyciel['id'] = data['id']
-
-        # Aktualizuj istniejące rekordy
-        if to_update:
-            for item in to_update:
-                supabase.table('nauczyciele').update(item).eq('id', item['id']).execute()
-
-        # Tworzenie powiązań nauczyciel-grupa z przekazaniem mapy UUID
-        for nauczyciel in nauczyciele:
-            if 'id' in nauczyciel and 'grupy_id' in nauczyciel:
-                for grupa_id in nauczyciel['grupy_id']:
-                    _utworz_powiazanie_nauczyciel_grupa(nauczyciel['id'], grupa_id, uuid_map)
-
-        print(f"✅ Zaktualizowano {len(to_update)} nauczycieli, dodano {len(to_insert)} nowych")
-        return nauczyciele
-    except Exception as e:
-        print(f"❌ Błąd podczas aktualizacji nauczycieli: {e}")
+def save_nauczyciele(nauczyciele, grupa_uuid_map, batch_size=1000):
+    if not nauczyciele:
         return []
-
-def update_grupy(grupy):
-    """Aktualizuje informacje o grupach w bazie danych."""
-    try:
-        print(f"Aktualizuję informacje o {len(grupy)} grupach...")
-
-        # Sprawdzenie czy lista jest pusta
-        if not grupy:
-            print("Brak grup do zapisania.")
-            return []
-
-        # Przygotuj dane do dodania zgodnie z nazwami kolumn w bazie
-        grupy_do_zapisu = []
-        for grupa in grupy:
-            grupa_data = {
-                'kod_grupy': grupa.get('kod_grupy'),
-                'semestr': grupa.get('semestr'),
-                'tryb_studiow': grupa.get('tryb_studiow'),
-                'kierunek_id': grupa.get('kierunek_id'),
-                'link_grupy': grupa.get('link_grupy')
+    total = 0
+    for batch_i, batch in enumerate(chunks(nauczyciele, batch_size), 1):
+        nauczyciele_data = []
+        relacje = []
+        for nauczyciel in batch:
+            if is_dataclass(nauczyciel):
+                nauczyciel = asdict(nauczyciel)
+            record = {
+                'nauczyciel_id': nauczyciel.get('nauczyciel_id'),
+                'nauczyciel_nazwa': nauczyciel.get('nauczyciel_nazwa') or nauczyciel.get('nazwa') or nauczyciel.get('imie_nazwisko')
             }
+            if nauczyciel.get('instytut'): record['instytut'] = nauczyciel['instytut']
+            if nauczyciel.get('email'): record['email'] = nauczyciel['email']
+            if nauczyciel.get('link_plan_nauczyciela'): record['link_plan_nauczyciela'] = nauczyciel['link_plan_nauczyciela']
+            if nauczyciel.get('link_strony_nauczyciela'): record['link_strony_nauczyciela'] = nauczyciel['link_strony_nauczyciela']
+            nauczyciele_data.append(record)
+            # Relacja nauczyciel-grupa
+            if 'nauczyciel_id' in nauczyciel and 'grupy_id' in nauczyciel and nauczyciel['grupy_id']:
+                for grupa_id_UZ in nauczyciel['grupy_id']:
+                    g_uuid = grupa_uuid_map.get(str(grupa_id_UZ))
+                    if g_uuid:
+                        relacje.append({'nauczyciel_id': nauczyciel['nauczyciel_id'], 'grupa_id': g_uuid})
+        try:
+            supabase.table('nauczyciele').upsert(nauczyciele_data, on_conflict='nauczyciel_id').execute()
+            total += len(nauczyciele_data)
+            print(f"✅ Upsertowano batch {batch_i}: {len(nauczyciele_data)} nauczycieli (razem: {total})")
+            if relacje:
+                supabase.table('nauczyciele_grupy').upsert(relacje, on_conflict='nauczyciel_id,grupa_id').execute()
+                print(f"✅ Upsertowano {len(relacje)} relacji nauczyciel-grupa w batchu {batch_i}")
+        except Exception as e:
+            print(f"❌ Błąd podczas upsertowania batcha nauczycieli: {e}")
+    return total
 
-            if grupa.get('grupa_id'):
-                grupa_data['link_ics_grupy'] = f"{BASE_URL}grupy_ics.php?ID={grupa.get('grupa_id')}&KIND=GG"
+def truncate_fields(event):
+    return {
+        'uid': event.get('uid'),
+        'przedmiot': event.get('przedmiot'),
+        'od': event.get('od'),
+        'do_': event.get('do_'),
+        'miejsce': (event.get('miejsce')[:255] if isinstance(event.get('miejsce'), str) else event.get('miejsce')),
+        'rz': (event.get('rz')[:10] if isinstance(event.get('rz'), str) else event.get('rz')),
+        'link_ics_zrodlowy': (event.get('link_ics_zrodlowy')[:255] if isinstance(event.get('link_ics_zrodlowy'), str) else event.get('link_ics_zrodlowy')),
+        'podgrupa': (event.get('podgrupa')[:20] if isinstance(event.get('podgrupa'), str) else event.get('podgrupa')),
+        'source_type': event.get('source_type'),
+        'nauczyciel_nazwa': (event.get('nauczyciel_nazwa')[:255] if isinstance(event.get('nauczyciel_nazwa'), str) else event.get('nauczyciel_nazwa')),
+        'kod_grupy': (event.get('kod_grupy')[:50] if isinstance(event.get('kod_grupy'), str) else event.get('kod_grupy')),
+        'kierunek_nazwa': (event.get('kierunek_nazwa')[:255] if isinstance(event.get('kierunek_nazwa'), str) else event.get('kierunek_nazwa')),
+        'grupa_id': event.get('grupa_id'),
+        'nauczyciel_id': event.get('nauczyciel_id')
+    }
 
-            grupy_do_zapisu.append(grupa_data)
+def zajecie_key(event: dict) -> Tuple:
+    uid = event.get('uid')
+    if uid:
+        return ('UID', uid)
+    return (
+        'HEUR',
+        event.get('od'),
+        event.get('do_'),
+        event.get('miejsce'),
+        event.get('kod_grupy'),
+        event.get('przedmiot')
+    )
 
-        print(f"Przygotowano {len(grupy_do_zapisu)} grup do zapisu")
+def deduplicate_events(events: List[dict]) -> List[dict]:
+    seen: Set[Tuple] = set()
+    deduped = []
+    for event in events:
+        key = zajecie_key(event)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(event)
+    return deduped
 
-        # Zapisz grupy tylko jeśli lista nie jest pusta
-        if grupy_do_zapisu:
-            wynik = supabase.table('grupy').upsert(grupy_do_zapisu).execute()
-
-            # Utwórz mapowanie oryginalnego ID do nowego UUID
-            uuid_map = {}
-            if hasattr(wynik, 'data'):
-                for grupa_db in wynik.data:
-                    if grupa_db.get('kod_grupy'):
-                        for grupa in grupy:
-                            if grupa.get('kod_grupy') == grupa_db.get('kod_grupy'):
-                                uuid_map[grupa.get('grupa_id')] = grupa_db['id']
-                                grupa['uuid'] = grupa_db['id']
-                                break
-
-            ilosc_zapisanych = len(wynik.data) if hasattr(wynik, 'data') else 0
-            print(f"Zapisano {ilosc_zapisanych} grup do bazy danych.")
-            print(f"Utworzono {len(uuid_map)} mapowań UUID.")
-
-            return wynik.data if hasattr(wynik, 'data') else []
-        else:
-            print("Brak danych grup do zapisania.")
-            return []
-
-    except Exception as e:
-        print(f"Błąd podczas aktualizacji grup: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
-
-def update_zajecia(grupy_data=None, nauczyciele_data=None):
-    """Pobiera i aktualizuje plany zajęć dla grup i nauczycieli."""
-    from scraper.ics_updater import parse_ics_file, fetch_ics_content
-    import concurrent.futures
-    from tqdm import tqdm
-
-    zajecia_count = 0
-    max_workers = 30  # Zwiększamy liczbę wątków dla szybszego pobierania
-
-    # Funkcja do przetwarzania pojedynczej grupy
-    def process_grupa(grupa):
-        if not grupa.get('uuid') or not grupa.get('link_ics_grupy'):
-            return []
-
-        ics_link = grupa['link_ics_grupy']
-        ics_content = fetch_ics_content(ics_link)
-        if not ics_content:
-            return []
-
-        events = parse_ics_file(ics_content, link_ics_zrodlowy=ics_link)
-        for event in events:
-            event['grupa_id'] = grupa['uuid']
-
-        return events
-
-    # Funkcja do przetwarzania nauczyciela
-    def process_nauczyciel(nauczyciel):
-        if not nauczyciel.get('id') or not nauczyciel.get('link_plan_nauczyciela'):
-            return []
-
-        nauczyciel_id = nauczyciel['link_plan_nauczyciela'].split('ID=')[1] if 'ID=' in nauczyciel['link_plan_nauczyciela'] else None
-        if not nauczyciel_id:
-            return []
-
-        ics_link = f"{BASE_URL}nauczyciel_ics.php?ID={nauczyciel_id}&KIND=NT"
-        ics_content = fetch_ics_content(ics_link)
-        if not ics_content:
-            return []
-
-        events = parse_ics_file(ics_content, link_ics_zrodlowy=ics_link)
-        for event in events:
-            event['nauczyciel_id'] = nauczyciel['id']
-
-        return events
-
-    try:
-        # Przetwarzanie grup równolegle w partiach
-        if grupy_data:
-            print(f"Pobieranie planów zajęć dla {len(grupy_data)} grup...")
-
-            # Dzielimy na mniejsze porcje żeby lepiej zarządzać pamięcią
-            batch_size = 100
-            for i in range(0, len(grupy_data), batch_size):
-                current_batch = grupy_data[i:i+batch_size]
-                all_events = []
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {executor.submit(process_grupa, grupa): grupa for grupa in current_batch}
-
-                    for future in tqdm(concurrent.futures.as_completed(futures),
-                                      total=len(futures),
-                                      desc=f"Pobieranie planów grup {i+1}-{i+len(current_batch)} z {len(grupy_data)}"):
-                        events = future.result()
-                        all_events.extend(events)
-
-                batch_count = save_events_batch(all_events, source_type='grupa')
-                zajecia_count += batch_count
-
-        # Przetwarzanie nauczycieli równolegle w partiach
-        if nauczyciele_data:
-            print(f"Pobieranie planów zajęć dla {len(nauczyciele_data)} nauczycieli...")
-
-            # Dzielimy na mniejsze porcje żeby lepiej zarządzać pamięcią
-            batch_size = 100
-            for i in range(0, len(nauczyciele_data), batch_size):
-                current_batch = nauczyciele_data[i:i+batch_size]
-                all_events = []
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {executor.submit(process_nauczyciel, n): n for n in current_batch}
-
-                    for future in tqdm(concurrent.futures.as_completed(futures),
-                                      total=len(futures),
-                                      desc=f"Pobieranie planów nauczycieli {i+1}-{i+len(current_batch)} z {len(nauczyciele_data)}"):
-                        events = future.result()
-                        all_events.extend(events)
-
-                batch_count = save_events_batch(all_events, source_type='nauczyciel')
-                zajecia_count += batch_count
-
-        print(f"Zakończono pobieranie planów zajęć. Zapisano {zajecia_count} zajęć.")
-        return zajecia_count
-
-    except Exception as e:
-        print(f"Błąd podczas aktualizacji planów zajęć: {e}")
-        import traceback
-        traceback.print_exc()
+def save_zajecia(events, grupa_uuid_map, nauczyciel_uuid_map, batch_size=1000):
+    if not events:
         return 0
+    events = deduplicate_events(events)
+    total = 0
+    # Najpierw upsert batcha zajęć po UID (unikalny tekst)
+    for batch_i, batch in enumerate(chunks(events, batch_size), 1):
+        batch_data = []
+        for event in batch:
+            if is_dataclass(event):
+                event = asdict(event)
+            grupa_uuid = grupa_uuid_map.get(str(event.get('grupa_id'))) or grupa_uuid_map.get(str(event.get('kod_grupy')))
+            nauczyciel_nazwa = event.get('nauczyciel_nazwa') or event.get('nauczyciel')
+            nauczyciel_uuid = nauczyciel_uuid_map.get(nauczyciel_nazwa) if nauczyciel_nazwa else None
+            event['grupa_id'] = grupa_uuid
+            event['nauczyciel_id'] = nauczyciel_uuid
+            batch_data.append(truncate_fields(event))
+        try:
+            supabase.table('zajecia').upsert(batch_data, on_conflict='uid').execute()
+            total += len(batch_data)
+            print(f"✅ Upsertowano batch {batch_i}: {len(batch_data)} zajęć (razem: {total})")
+        except Exception as e:
+            print(f"❌ Błąd podczas upsertowania batcha zajęć: {e}")
+
+    # Po upsercie zajęć pobierz mapę UID -> ID (UUID)
+    result = supabase.table('zajecia').select('uid, id').execute()
+    uid_to_id_map = {row['uid']: row['id'] for row in result.data}
+
+    # Tworzenie relacji
+    relacje_grupy = []
+    relacje_nauczyciele = []
+    for event in events:
+        uuid_id = uid_to_id_map.get(event.get('uid'))
+        if not uuid_id:
+            continue
+        grupa_uuid = grupa_uuid_map.get(str(event.get('grupa_id'))) or grupa_uuid_map.get(str(event.get('kod_grupy')))
+        nauczyciel_nazwa = event.get('nauczyciel_nazwa') or event.get('nauczyciel')
+        nauczyciel_uuid = nauczyciel_uuid_map.get(nauczyciel_nazwa) if nauczyciel_nazwa else None
+        if grupa_uuid:
+            relacje_grupy.append({'zajecia_id': uuid_id, 'grupa_id': grupa_uuid})
+        if nauczyciel_uuid:
+            relacje_nauczyciele.append({'zajecia_id': uuid_id, 'nauczyciel_id': nauczyciel_uuid})
+
+    # Upsert relacji
+    if relacje_grupy:
+        try:
+            supabase.table('zajecia_grupy').upsert(relacje_grupy, on_conflict='zajecia_id,grupa_id').execute()
+        except Exception as e:
+            print(f"❌ Błąd podczas upsertowania relacji zajecia_grupy: {e}")
+    if relacje_nauczyciele:
+        try:
+            supabase.table('zajecia_nauczyciele').upsert(relacje_nauczyciele, on_conflict='zajecia_id,nauczyciel_id').execute()
+        except Exception as e:
+            print(f"❌ Błąd podczas upsertowania relacji zajecia_nauczyciele: {e}")
+
+    return total

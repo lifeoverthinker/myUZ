@@ -1,103 +1,54 @@
-"""
-Moduł do pobierania informacji o kierunkach studiów z planu UZ.
-"""
-import requests
 from bs4 import BeautifulSoup
-from typing import List
-
 from scraper.models import Kierunek
+from scraper.downloader import fetch_page, BASE_URL
 
-BASE_URL = "https://plan.uz.zgora.pl/"
-
-
-def fetch_page(url: str) -> str:
-    """Pobiera zawartość strony HTML."""
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        return response.text
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Błąd pobierania strony: {e}")
-        return ""
-
-
-def parse_departments_and_courses(html: str) -> List[Kierunek]:
+def scrape_kierunki() -> list:
     """
-    Parsuje HTML i wyodrębnia wydziały oraz kierunki.
+    Pobiera i zwraca listę kierunków studiów z głównej strony planu.
+    """
+    URL = BASE_URL + "grupy_lista_kierunkow.php"
+    print(f"🔍 Pobieram dane z: {URL}")
+    html = fetch_page(URL)
+    if not html:
+        print("❌ Nie udało się pobrać strony z listą kierunków.")
+        return []
+    return parse_departments_and_courses(html)
+
+def parse_departments_and_courses(html: str) -> list:
+    """
+    Parsuje HTML z listą wydziałów i kierunków.
     """
     soup = BeautifulSoup(html, "html.parser")
-    wynik = []
-
-    main_container = soup.find("div", class_="container main")
-    if not main_container:
+    container = soup.find("div", class_="container main")
+    if not container:
         print("❌ Nie znaleziono głównego kontenera.")
-        return wynik
-
-    wydzialy_items = main_container.find_all("li", class_="list-group-item")
-    wydzial = None
-
-    for item in wydzialy_items:
-        item_text = item.get_text(strip=True)
-
-        # Jeśli to nagłówek wydziału
-        if ("Wydział" in item_text or "Szkoły" in item_text) and not item.find("a", recursive=False):
-            # Pobierz tylko pierwszy węzeł tekstowy, bez zagnieżdżonych elementów
-            text_nodes = [n for n in item.contents if isinstance(n, str)]
-            if text_nodes:
-                wydzial = text_nodes[0].strip()
-            else:
-                wydzial = item_text.split()[0]
-
-            print(f"\n🔎 Wydział: {wydzial}\n")
-
-        # Jeśli to kierunek i mamy aktywny wydział
-        elif item.find("a") and wydzial:
-            a_tag = item.find("a")
-            nazwa_kierunku = a_tag.get_text(strip=True)
-            link = BASE_URL + a_tag["href"]
-
-            # Pomiń studia podyplomowe
-            if "Studia podyplomowe" not in nazwa_kierunku:
-                # Wydobycie ID kierunku z linku
-                kierunek_id = None
-                if "ID=" in link:
-                    try:
-                        kierunek_id = link.split("ID=")[1].split("&")[0]
-                    except (IndexError, ValueError):
-                        kierunek_id = None
-
-                if kierunek_id:
-                    kierunek = Kierunek(
-                        kierunek_id=kierunek_id,
-                        nazwa=nazwa_kierunku,
-                        wydzial=wydzial,
-                        link=link
-                    )
-                    wynik.append(kierunek)
-                    print(f"📌 Dodano kierunek: {nazwa_kierunku}")
-
-    return wynik
-
-
-def scrape_kierunki() -> List[Kierunek]:
-    """Scrapuje kierunki i wydziały."""
-    url = BASE_URL + "grupy_lista_kierunkow.php"
-    print(f"🔍 Pobieram dane z: {url}")
-    html = fetch_page(url)
-
-    if not html:
-        print("❌ Nie udało się pobrać strony.")
         return []
-
-    kierunki = parse_departments_and_courses(html)
-
-    # Upewnij się, że zawsze zwracamy listę
-    if not isinstance(kierunki, list):
-        print(f"⚠️ Wykryto pojedynczy obiekt Kierunek zamiast listy, konwertuję na listę.")
-        return [kierunki] if kierunki else []
-
+    kierunki = []
+    current_wydzial = None
+    for element in container.find_all("li", class_="lista-grup-item"):
+        # Wydział: li posiada pod-ul z kierunkami
+        sub_ul = element.find("ul", class_="lista-grup")
+        if sub_ul:
+            current_wydzial = element.contents[0].strip()
+            continue
+        # Kierunek: li posiada anchor z ID
+        anchor = element.find("a", href=True)
+        if not anchor or "ID=" not in anchor['href']:
+            continue
+        kierunek_id = anchor['href'].split("ID=")[1].split("&")[0]
+        nazwa_kierunku = anchor.text.strip()
+        pelny_link = BASE_URL + anchor['href'] if not anchor['href'].startswith("http") else anchor['href']
+        # Oznacz studia podyplomowe (ID ujemne lub w linku/nazwie)
+        czy_podyplomowe = False
+        if kierunek_id.startswith("-") or anchor.find("b") or "podyplomowe" in nazwa_kierunku.lower():
+            czy_podyplomowe = True
+        kierunek = Kierunek(
+            kierunek_id=kierunek_id,
+            nazwa_kierunku=nazwa_kierunku,
+            wydzial=current_wydzial,
+            link_strony_kierunku=pelny_link,
+            czy_podyplomowe=czy_podyplomowe
+        )
+        print(f"📌 Dodano kierunek: {nazwa_kierunku} ({current_wydzial}){' [STUDIA PODYPLOMOWE]' if czy_podyplomowe else ''}")
+        kierunki.append(kierunek)
     return kierunki
-
-if __name__ == "__main__":
-    kierunki = scrape_kierunki()
-    print(f"\nPobrano {len(kierunki)} kierunków.")

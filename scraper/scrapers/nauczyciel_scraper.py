@@ -1,137 +1,188 @@
-"""
-Moduł do pobierania informacji o nauczycielach akademickich z planu UZ.
-"""
-import concurrent.futures
-from functools import lru_cache
-from typing import List
+import requests
+from bs4 import BeautifulSoup
+from icalendar import Calendar
+from typing import Dict, Any, List, Optional
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from scraper.models import Nauczyciel, Grupa
-from scraper.downloader import fetch_page, BASE_URL
-from scraper.parsers.nauczyciel_parser import parse_nauczyciele_from_group_page, parse_nauczyciel_details
+from scraper.parsers.nauczyciel_parser import sprawdz_nieregularne_zajecia
 
+BASE_URL = "https://plan.uz.zgora.pl/"
 
-def sanitize_string(text):
-    """Oczyszcza ciąg znaków z nieprawidłowych kodowań i znaków binarnych."""
-    if text is None:
+def fetch_page(url: str) -> Optional[str]:
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        return resp.text
+    except Exception as e:
+        print(f"❌ Błąd pobierania strony: {url} — {e}")
         return None
 
-    if not isinstance(text, str):
-        return str(text)
-
-    # Poprawna lista polskich znaków
-    polish_chars = "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ"
-
-    # Zachowaj tylko znaki drukowalne i polskie znaki
-    result = ""
-    for char in text:
-        if char.isprintable() or char in polish_chars:
-            result += char
-
+def get_ics_urls(nauczyciel_id: str) -> Dict[str, Optional[str]]:
+    urls = {
+        "letni": f"{BASE_URL}nauczyciel_ics.php?ID={nauczyciel_id}&KIND=GG&S=0",
+        "zimowy": f"{BASE_URL}nauczyciel_ics.php?ID={nauczyciel_id}&KIND=GG&S=1",
+        "fallback": f"{BASE_URL}nauczyciel_ics.php?ID={nauczyciel_id}&KIND=GG"
+    }
+    result = {}
+    for key, url in urls.items():
+        try:
+            resp = requests.head(url, timeout=5)
+            ct = resp.headers.get("content-type", "")
+            result[key] = url if resp.status_code == 200 and "text/calendar" in ct else None
+        except Exception:
+            result[key] = None
     return result
 
+def parse_nauczyciel_details(html: str, nauczyciel_id: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+    dane = {}
+    h2_tags = soup.find_all("h2")
+    for h2 in h2_tags:
+        text = h2.get_text(strip=True)
+        if text and "Plan zajęć" not in text:
+            dane["imie_nazwisko"] = text.strip()
+            break
+    instytuty = []
+    for h3 in soup.find_all("h3"):
+        sublines = [frag.strip() for frag in h3.stripped_strings if frag.strip()]
+        instytuty.extend(sublines)
+    if instytuty:
+        dane["instytut"] = " | ".join(instytuty)
+    email = None
+    for h4 in soup.find_all("h4"):
+        a = h4.find("a", href=lambda href: href and "mailto:" in href)
+        if a:
+            email = a.get_text(strip=True)
+            break
+    if not email:
+        a = soup.find("a", href=lambda href: href and "mailto:" in href)
+        if a:
+            email = a.get_text(strip=True)
+    if email:
+        dane["email"] = email
+    link = f"{BASE_URL}nauczyciel_plan.php?ID={nauczyciel_id}"
+    dane["link_plan_nauczyciela"] = link
+    dane["link_strony_nauczyciela"] = link
+    return dane
 
-@lru_cache(maxsize=500)
-def fetch_page_cached(url: str) -> str:
-    """Cachowana wersja fetch_page dla zwiększenia wydajności."""
-    return fetch_page(url)
+def parse_ics_for_nauczyciel(ics_text: str, nauczyciel_id: str, nauczyciel_nazwa: str, semestr: Optional[str]=None) -> List[Dict[str, Any]]:
+    cal = Calendar.from_ical(ics_text)
+    zajecia = []
+    for comp in cal.walk():
+        if comp.name != "VEVENT":
+            continue
+        summary = str(comp.get("SUMMARY"))
+        start = comp.get("DTSTART").dt
+        end = comp.get("DTEND").dt
+        location = comp.get("LOCATION")
+        categories = comp.get("CATEGORIES")
+        uid = comp.get("UID")
+        rz = None
+        if categories:
+            if isinstance(categories, (list, tuple)):
+                rz = ",".join([cat.to_ical().decode(errors="ignore").strip() if hasattr(cat, "to_ical") else str(cat) for cat in categories])
+            else:
+                rz = categories.to_ical().decode(errors="ignore").strip() if hasattr(categories, "to_ical") else str(categories)
+            rz = rz[:10] if rz and len(rz) > 10 else rz
+        przedmiot = summary.split("(")[0].strip() if "(" in summary else summary.strip()
+        kod_grupy = re.search(r":\s*([A-Za-z0-9\-/]+)", summary)
+        kod_grupy = kod_grupy.group(1).strip() if kod_grupy else None
+        zajecia.append({
+            "przedmiot": przedmiot,
+            "rz": rz,
+            "nauczyciel_nazwa": nauczyciel_nazwa,
+            "od": start.isoformat() if hasattr(start, "isoformat") else str(start),
+            "do_": end.isoformat() if hasattr(end, "isoformat") else str(end),
+            "miejsce": location,
+            "uid": str(uid) if uid else None,
+            "kod_grupy": kod_grupy,
+            "nauczyciel_id": nauczyciel_id,
+            "source_type": "ICS_NAUCZYCIEL",
+            "semestr": semestr
+        })
+    return zajecia
 
+def deduplicate_zajecia(zajecia: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen = set()
+    result = []
+    for z in zajecia:
+        if z.get("uid") and z["uid"] not in seen:
+            seen.add(z["uid"])
+            result.append(z)
+        elif not z.get("uid"):
+            result.append(z)
+    return result
 
-def fetch_and_parse_nauczyciel(nauczyciel: Nauczyciel) -> Nauczyciel:
-    """Pobiera i parsuje stronę nauczyciela, uzupełniając dane."""
-    link = nauczyciel.link_strony_nauczyciela
-    html = fetch_page(link)
-
+def scrape_nauczyciel_and_zajecia(nauczyciel_id: str) -> Optional[dict]:
+    html = fetch_page(f"{BASE_URL}nauczyciel_plan.php?ID={nauczyciel_id}")
     if not html:
-        print(f"❌ Nie udało się pobrać strony nauczyciela: {sanitize_string(nauczyciel.nazwa)}")
-        return nauczyciel
+        print(f"Nie udało się pobrać strony nauczyciela {nauczyciel_id}")
+        return None
 
-    szczegoly = parse_nauczyciel_details(html)
+    # Sprawdź, czy są zajęcia nieregularne
+    ma_nieregularne = sprawdz_nieregularne_zajecia(html, f"nauczyciela {nauczyciel_id}")
 
-    # Aktualizacja atrybutów obiektu Nauczyciel
-    if 'imie_nazwisko' in szczegoly:
-        nauczyciel.imie_nazwisko = szczegoly['imie_nazwisko']
-    if 'instytut' in szczegoly:
-        nauczyciel.instytut = szczegoly['instytut']
-    if 'email' in szczegoly:
-        nauczyciel.email = szczegoly['email']
-    if 'link_plan_nauczyciela' in szczegoly:
-        nauczyciel.link_plan_nauczyciela = szczegoly['link_plan_nauczyciela']
+    # Sprawdź, czy na stronie jest komunikat "nie ma jeszcze zaplanowanych żadnych zajęć"
+    soup = BeautifulSoup(html, "html.parser")
+    komunikat = soup.find(string=lambda s: s and "nie ma jeszcze zaplanowanych żadnych zajęć" in s.lower())
 
-    return nauczyciel
+    nauczyciel = parse_nauczyciel_details(html, nauczyciel_id)
+    nauczyciel["nauczyciel_id"] = nauczyciel_id
 
+    ics_urls = get_ics_urls(nauczyciel_id)
+    for key, url in ics_urls.items():
+        nauczyciel[f"link_ics_nauczyciela_{key}"] = url
 
-def pobierz_nauczycieli_z_grupy(link_grupy: str, grupa_id) -> List[Nauczyciel]:
-    """Pomocnicza funkcja do pobierania nauczycieli z jednej grupy."""
-    html = fetch_page_cached(link_grupy)
-    if not html:
-        return []
-    return parse_nauczyciele_from_group_page(html, grupa_id)
+    zajecia = []
+    for sem, url in ics_urls.items():
+        if not url:
+            continue
+        try:
+            ics_data = fetch_page(url)
+            if not ics_data or "BEGIN:VCALENDAR" not in ics_data:
+                print(f"Nie udało się pobrać lub rozpoznać ICS ({sem}) dla nauczyciela {nauczyciel_id}")
+                continue
+            result = parse_ics_for_nauczyciel(
+                ics_data,
+                nauczyciel_id,
+                nauczyciel.get("imie_nazwisko", ""),
+                semestr=sem if sem in ["letni", "zimowy"] else None
+            )
+            if not isinstance(result, list):
+                print(f"⚠️ Parser ICS zwrócił {type(result)} zamiast listy dla nauczyciela {nauczyciel_id} ({sem})")
+                continue
+            zajecia += result
+        except Exception as e:
+            print(f"❌ Błąd pobierania ICS nauczyciela {nauczyciel_id}: {e}")
 
+    if not zajecia:
+        if ma_nieregularne:
+            print(f"Nauczyciel {nauczyciel_id} nie ma zaplanowanych zajęć regularnych – w planie są tylko zajęcia nieregularne (nie są dostępne w pliku ICS).")
+        elif komunikat:
+            print(f"Nauczyciel {nauczyciel_id} nie ma jeszcze zaplanowanych żadnych zajęć.")
+        else:
+            print(f"Nauczyciel {nauczyciel_id} nie ma zaplanowanych żadnych zajęć lub plik ICS jest pusty.")
+        return None
 
-def scrape_nauczyciele_from_grupy(grupy: list, max_workers=10) -> List[Nauczyciel]:
-    """Scrapuje nauczycieli z planów zajęć podanych grup równolegle."""
-    wszystkie_linki_nauczycieli = []
-    wszyscy_nauczyciele = []
-    znalezieni_nauczyciele_id = set()
+    return {
+        "nauczyciel": nauczyciel,
+        "zajecia": deduplicate_zajecia(zajecia)
+    }
 
-    # 1. Równoległe pobieranie linków nauczycieli
-    print(f"🧑‍🏫 Pobieram linki nauczycieli dla {len(grupy)} grup równolegle...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        zadania = {}
-        for grupa in grupy:
-            # Obsługuje zarówno obiekty Grupa jak i słowniki podczas okresu przejściowego
-            kod_grupy = grupa.kod_grupy if hasattr(grupa, 'kod_grupy') else grupa.get('kod_grupy')
-            link_grupy = grupa.link_grupy if hasattr(grupa, 'link_grupy') else grupa.get('link_grupy')
-            grupa_id = grupa.grupa_id if hasattr(grupa, 'grupa_id') else grupa.get('grupa_id')
-
-            zadania[executor.submit(pobierz_nauczycieli_z_grupy, link_grupy, grupa_id)] = kod_grupy
-
-        for zadanie in concurrent.futures.as_completed(zadania):
-            kod_grupy = zadania[zadanie]
+def scrape_nauczyciele_parallel(nauczyciel_ids: List[str], max_workers: int = 20) -> List[dict]:
+    results = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(scrape_nauczyciel_and_zajecia, nid): nid for nid in nauczyciel_ids}
+        for i, future in enumerate(as_completed(futures), 1):
+            nid = futures[future]
             try:
-                nauczyciele = zadanie.result()
-                wszystkie_linki_nauczycieli.extend(nauczyciele)
-                print(f"✅ Znaleziono {len(nauczyciele)} nauczycieli w grupie {kod_grupy}")
+                res = future.result()
+                if res:
+                    results.append(res)
+                    print(f"[{i}/{len(nauczyciel_ids)}] OK: {nid}")
+                else:
+                    print(f"[{i}/{len(nauczyciel_ids)}] Brak danych: {nid}")
             except Exception as e:
-                print(f"❌ Błąd pobierania nauczycieli dla grupy {kod_grupy}: {str(e)}")
-
-    print(f"\n🔍 Znaleziono {len(wszystkie_linki_nauczycieli)} łącznie nauczycieli, pobieram szczegóły...")
-
-    # 2. Równoległe pobieranie szczegółów nauczycieli
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        zadania = []
-
-        for nauczyciel in wszystkie_linki_nauczycieli:
-            if nauczyciel.nauczyciel_id not in znalezieni_nauczyciele_id:
-                znalezieni_nauczyciele_id.add(nauczyciel.nauczyciel_id)
-                zadania.append(executor.submit(fetch_and_parse_nauczyciel, nauczyciel))
-
-        ukonczone = 0
-        for zadanie in concurrent.futures.as_completed(zadania):
-            try:
-                nauczyciel = zadanie.result()
-                wszyscy_nauczyciele.append(nauczyciel)
-                ukonczone += 1
-                if ukonczone % 10 == 0:
-                    print(f"🧪 Pobrano {ukonczone}/{len(zadania)} szczegółów nauczycieli...")
-            except Exception as e:
-                print(f"❌ Błąd pobierania szczegółów nauczyciela: {str(e)}")
-
-    return wszyscy_nauczyciele
-
-
-if __name__ == "__main__":
-    # Dla samodzielnego testowania
-    from scraper.scrapers.kierunki_scraper import scrape_kierunki
-    from scraper.scrapers.grupy_scraper import scrape_grupy_for_kierunki
-
-    kierunki = scrape_kierunki()
-    # Testujemy tylko na kilku pierwszych kierunkach
-    grupy = scrape_grupy_for_kierunki(kierunki[:1])
-    # Testujemy tylko na kilku pierwszych grupach
-    nauczyciele = scrape_nauczyciele_from_grupy(grupy[:3])
-
-    print(f"\nPobrano {len(nauczyciele)} nauczycieli.")
-    for n in nauczyciele:
-        sanitized_name = sanitize_string(n.imie_nazwisko)
-        print(f"Nauczyciel: {sanitized_name}, Email: {n.email if hasattr(n, 'email') else 'brak'}")
+                print(f"[{i}/{len(nauczyciel_ids)}] Błąd {nid}: {e}")
+    return results

@@ -1,47 +1,48 @@
+"""
+Test parsowania szczegółów nauczyciela oraz ICS dla wybranego nauczyciela.
+Użycie: python -m scraper.test <nauczyciel_id>
+"""
+
 import sys
-import os
+from scraper.scrapers.nauczyciel_scraper import fetch_page, parse_nauczyciel_details, get_ics_urls, parse_ics_for_nauczyciel
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from scraper.ics_updater import fetch_ics_content, parse_ics_file, BASE_URL
-
-# Przykładowe ID grupy do testu
-GRUPA_TEST_ID = "29409"
-ICS_TEST_URL = f"{BASE_URL}grupy_ics.php?ID={GRUPA_TEST_ID}&KIND=GG"
-
-
-def test_parsowania_ics():
-    # Pobierz dane ICS
-    print(f"Pobieranie danych ICS z: {ICS_TEST_URL}")
-    ics_content = fetch_ics_content(ICS_TEST_URL)
-
-    if not ics_content:
-        print("Nie udało się pobrać pliku ICS!")
+def print_nauczyciel_details(nauczyciel_id):
+    url = f"https://plan.uz.zgora.pl/nauczyciel_plan.php?ID={nauczyciel_id}"
+    html = fetch_page(url)
+    if not html:
+        print(f"❌ Błąd pobierania strony nauczyciela {nauczyciel_id}")
         return
+    details = parse_nauczyciel_details(html, nauczyciel_id)
+    print(f"\nSzczegóły nauczyciela {nauczyciel_id}:")
+    for k, v in details.items():
+        print(f"  {k}: {v if v is not None else '<brak>'}")
 
-    # Parsuj dane
-    print("Parsowanie danych ICS...")
-    events = parse_ics_file(ics_content, ICS_TEST_URL)
+    # Dodatkowo testuj ICS
+    ics_urls = get_ics_urls(nauczyciel_id)
+    found_ics = False
+    for sem, ics_url in ics_urls.items():
+        if ics_url:
+            print(f"\nPobieram ICS ({sem}): {ics_url}")
+            ics_content = fetch_page(ics_url)
+            if ics_content and "BEGIN:VCALENDAR" in ics_content:
+                events = parse_ics_for_nauczyciel(ics_content, nauczyciel_id, details.get("imie_nazwisko", ""), semestr=sem)
+                print(f"  ✔️ Znalazłem {len(events)} zajęć w ICS ({sem})")
+                if events:
+                    print(f"  Przykład zajęć:")
+                    for k, v in events[0].items():
+                        print(f"    {k}: {v}")
+                found_ics = True
+            else:
+                print(f"  ⚠️ Brak poprawnego ICS ({sem}) lub plik uszkodzony.")
+    if not found_ics:
+        print("❌ Nie znaleziono żadnego poprawnego pliku ICS dla tego nauczyciela.")
 
-    print(f"Znaleziono {len(events)} zajęć. Wyświetlam pierwsze 10:")
-
-    # Wyświetl pierwsze 10 zajęć
-    for i, event in enumerate(events[:10]):
-        print(f"\nZajęcia #{i + 1}:")
-        print(f"  Przedmiot: {event['przedmiot']}")
-        print(f"  Rodzaj zajęć (RZ): {event['rz']}")
-        print(f"  Podgrupa: {event['podgrupa']}")
-        print(f"  Nauczyciel: {event['nauczyciel']}")
-        print(f"  Miejsce: {event['miejsce']}")
-        print(f"  Od: {event['od']}")
-        print(f"  Do: {event['do_']}")
-
-    # Test długości pola rz
-    print("\nSprawdzenie długości pola RZ dla wszystkich zajęć:")
-    for event in events:
-        if event['rz'] and len(event['rz']) > 10:
-            print(f"UWAGA! Pole RZ za długie: '{event['rz']}' ({len(event['rz'])} znaków)")
-
+def main():
+    if len(sys.argv) < 2:
+        print("Użycie: python -m scraper.test <nauczyciel_id>")
+        sys.exit(1)
+    nauczyciel_id = sys.argv[1]
+    print_nauczyciel_details(nauczyciel_id)
 
 if __name__ == "__main__":
-    test_parsowania_ics()
+    main()

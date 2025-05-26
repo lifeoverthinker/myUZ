@@ -1,187 +1,122 @@
-"""
-Moduł do parsowania danych dotyczących grup studenckich.
-"""
 from bs4 import BeautifulSoup
 from icalendar import Calendar
 import re
 from typing import Tuple, List, Dict, Optional, Any
 
-from scraper.downloader import fetch_page, BASE_URL
-
-
-def wyodrebnij_dane_z_summary(summary: str, categories: Optional[Any] = None) -> Tuple[
-    str, Optional[str], Optional[str], str]:
+def wyodrebnij_dane_z_summary_grupa(summary: str) -> Tuple[str, Optional[str], Optional[str]]:
     """
-    Ekstrahuje przedmiot, rodzaj zajęć (RZ), nauczyciela i podgrupę (PG) z opisu.
-
-    Args:
-        summary: Pole SUMMARY z pliku ICS
-        categories: Pole CATEGORIES z pliku ICS (opcjonalne)
+    Ekstrahuje przedmiot, nauczyciela i podgrupę (PG) z opisu ICS GRUPY.
     """
     przedmiot = summary
     nauczyciel = None
-    pg = "CAŁY KIERUNEK"
+    pg = None
 
-    # Rodzaj zajęć bierzemy wyłącznie z categories
-    rz = None
-    if categories:
-        try:
-            # Próba konwersji obiektu vCategory na string
-            rz = str(categories).strip()
-        except:
-            pass
-
-    # Szukamy wzorca do wyodrębnienia nazwy przedmiotu i nauczyciela
-    match = re.search(r"(.*?)\s*\(([^():]+)\):\s+(.+)", summary)
+    match = re.search(r"^(.*?)\s*\([^\)]+\):\s*(.+?)(?:\s*\(PG:.*\))?$", summary)
     if match:
         przedmiot = match.group(1).strip()
-        nauczyciel = match.group(3).strip()
+        nauczyciel = match.group(2).strip()
     else:
         przedmiot = summary.strip()
-
-    # Szukamy podgrupy PG w nawiasie, np. (PG: SN)
     pg_match = re.search(r"\(PG:\s*([^)]+)\)", summary)
     if pg_match:
         pg = pg_match.group(1).strip()
-        # Usuwamy ten fragment z nauczyciela
-        nauczyciel = re.sub(r"\(PG:.*?\)", "", nauczyciel).strip() if nauczyciel else None
+        if nauczyciel:
+            nauczyciel = re.sub(r"\(PG:.*?\)", "", nauczyciel).strip()
+    return przedmiot, nauczyciel, pg
 
-    return przedmiot, rz, nauczyciel, pg
+def parse_ics(
+    ics_content: str,
+    grupa_id: Optional[str] = None,
+    ics_url: Optional[str] = None,
+    kod_grupy: Optional[str] = None,
+    kierunek_nazwa: Optional[str] = None,
+    grupa_map: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Parsuje plik ICS grupy i zwraca listę wydarzeń (zajęć).
+    """
+    if not ics_content:
+        return []
+    events = []
+    try:
+        cal = Calendar.from_ical(ics_content)
+        for component in cal.walk('VEVENT'):
+            summary = str(component.get('summary', ''))
+            categories = component.get('categories')
+            start_time = component.get('dtstart').dt
+            end_time = component.get('dtend').dt
+            location = str(component.get('location', ''))
+            uid = str(component.get('uid', ''))
+            # RZ z kategorii
+            rz = None
+            if categories:
+                try:
+                    if hasattr(categories, 'to_ical'):
+                        rz = categories.to_ical().decode(errors="ignore").strip()
+                    else:
+                        rz = str(categories).strip()
+                    if rz and len(rz) > 10:
+                        rz = rz[:10]
+                except Exception:
+                    rz = None
+            przedmiot, nauczyciel, podgrupa = wyodrebnij_dane_z_summary_grupa(summary)
+            event = {
+                "przedmiot": przedmiot,
+                "od": start_time.isoformat() if hasattr(start_time, "isoformat") else start_time,
+                "do_": end_time.isoformat() if hasattr(end_time, "isoformat") else end_time,
+                "miejsce": location,
+                "rz": rz,
+                "link_ics_zrodlowy": ics_url,
+                "podgrupa": podgrupa,
+                "uid": uid,
+                "nauczyciel_nazwa": nauczyciel,
+                "kod_grupy": kod_grupy,
+                "kierunek_nazwa": kierunek_nazwa,
+                "grupa_id": grupa_id,
+                "source_type": "ICS_GRUPA"
+            }
+            events.append(event)
+    except Exception as e:
+        print(f"Błąd podczas parsowania pliku ICS: {e}")
+    return events
 
-
-def parse_grupa_details(html_content):
-    """Parsuje HTML planu zajęć grupy, wyciągając kod grupy, tryb studiów i semestr."""
+def parse_grupa_details(html_content: str) -> Dict[str, Any]:
+    """
+    Parsuje HTML planu zajęć grupy, wyciągając kod grupy, tryb studiów, semestr i nazwę kierunku.
+    """
     soup = BeautifulSoup(html_content, 'html.parser')
-
-    # Kod grupy z drugiego elementu H2
     h2_elements = soup.find_all('h2')
     kod_grupy = h2_elements[1].text.strip() if len(h2_elements) > 1 else "Nieznany"
-
-    # Informacje z H3
     h3 = soup.find('h3')
-    h3_text = h3.text if h3 else ""
+    kierunek_nazwa = None
+    tryb_studiow = None
+    semestr = None
 
-    # Tryb studiów - szukamy dokładniej
-    tryb_studiow = "nieznany"
-    if "niestacjonarne" in h3_text.lower():
-        tryb_studiow = "niestacjonarne"
-    elif "stacjonarne" in h3_text.lower():
-        tryb_studiow = "stacjonarne"
-
-    # Semestr
-    semestr = "nieznany"
-    if "letni" in h3_text.lower():
-        semestr = "letni"
-    elif "zimowy" in h3_text.lower():
-        semestr = "zimowy"
+    if h3:
+        # Pobierz wszystkie linie z <h3>, rozdzielone <br>
+        lines = [line.strip() for line in h3.stripped_strings if line.strip()]
+        if lines:
+            kierunek_nazwa = lines[0]
+            # Szukaj trybu studiów w drugiej linii (np. "stacjonarne / pierwszego stopnia z tyt. inżyniera")
+            if len(lines) > 1:
+                tryb_studiow = lines[1].split("/")[0].strip().lower()
+            # Szukaj semestru w trzeciej linii (np. "semestr letni 2024/2025")
+            if len(lines) > 2:
+                sem_line = lines[2].lower()
+                if "letni" in sem_line:
+                    semestr = "letni"
+                elif "zimowy" in sem_line:
+                    semestr = "zimowy"
 
     return {
         "kod_grupy": kod_grupy,
+        "kierunek_nazwa": kierunek_nazwa,
         "tryb_studiow": tryb_studiow,
         "semestr": semestr
     }
 
-
-# Alias dla zachowania kompatybilności
-parsuj_html_grupa = parse_grupa_details
-
-
-def parse_ics(content: str, grupa_id=None) -> List[Dict[str, Any]]:
-    """Parsuje plik ICS i wydobywa wydarzenia (zajęcia)."""
-    events = []
-    cal = Calendar.from_ical(content)
-
-    for component in cal.walk():
-        if component.name != "VEVENT":
-            continue
-
-        summary = component.get("SUMMARY")
-        start = component.get("DTSTART").dt
-        end = component.get("DTEND").dt
-        location = component.get("LOCATION")
-        categories = component.get("CATEGORIES")
-
-        # Wyodrębnianie danych z summary z uwzględnieniem categories jeśli dostępne
-        przedmiot, rz, nauczyciel, pg = wyodrebnij_dane_z_summary(summary, categories)
-
-        event_data = {
-            "przedmiot": przedmiot,
-            "rz": rz,
-            "nauczyciel": nauczyciel,
-            "pg": pg,
-            "od": start,
-            "do_": end,
-            "miejsce": location
-        }
-
-        # Dodaj grupa_id jeśli podano
-        if grupa_id is not None:
-            event_data["grupa_id"] = grupa_id
-
-        events.append(event_data)
-
-    return events
-
-
-def wyodrebnij_semestr_i_tryb(h3_tag) -> Tuple[str, str]:
-    """Ekstrahuje semestr i tryb studiów z tagu H3."""
-    semestr = "nieznany"
-    tryb_studiow = "nieznany"
-
-    if h3_tag:
-        text = h3_tag.get_text(strip=True).lower()
-        if "semestr letni" in text:
-            semestr = "letni"
-        elif "semestr zimowy" in text:
-            semestr = "zimowy"
-
-        if "stacjonarne" in text and "niestacjonarne" not in text:
-            tryb_studiow = "stacjonarny"
-        elif "niestacjonarne" in text:
-            tryb_studiow = "niestacjonarny"
-
-    return semestr, tryb_studiow
-
-
-def wyodrebnij_kod_grupy(h2_tags) -> str:
-    """Ekstrahuje kod grupy z drugiego tagu H2."""
-    if len(h2_tags) < 2:
-        raise ValueError("Nie znaleziono drugiego <h2> z kodem grupy.")
-
-    kod_grupy_text = h2_tags[1].get_text(strip=True)
-
-    # Wyodrębnij krótszy kod - pierwszą część przed spacją lub '/'
-    kod_parts = re.split(r'[ /]', kod_grupy_text)
-    if kod_parts and kod_parts[0]:
-        return kod_parts[0]
-
-    return kod_grupy_text
-
-
-def pobierz_semestr_i_tryb_z_grupy(url: str) -> Tuple[str, str]:
-    """Pobiera informację o semestrze i trybie studiów z podstrony grupy."""
-    print(f"Pobieranie semestru i trybu z URL: {url}")
-    html = fetch_page(url)
-    if not html:
-        print("❌ Nie udało się pobrać HTML!")
-        return "nieznany", "nieznany"
-
-    soup = BeautifulSoup(html, "html.parser")
-    h3_tag = soup.find('h3')
-
-    if not h3_tag:
-        print("❌ Nie znaleziono tagu h3 w HTML!")
-    else:
-        print(f"Znaleziony tekst h3: {h3_tag.get_text(strip=True)}")
-
-    semestr, tryb = wyodrebnij_semestr_i_tryb(h3_tag)
-    print(f"Wyodrębniony semestr: {semestr}, tryb: {tryb}")
-    return semestr, tryb
-
-
-def pobierz_semestr_z_grupy(url: str) -> str:
-    """Pobiera informację o semestrze z podstrony grupy."""
-    semestr, _ = pobierz_semestr_i_tryb_z_grupy(url)
-    return semestr
-
-# Usunięto funkcję parse_grupy - pozostaje tylko w scraper/scrapers/grupy_scraper.py
+def parsuj_html_grupa(html_content: str) -> Dict[str, Any]:
+    """
+    Wrapper do wyciągania szczegółów grupy z HTML (dla scraperów).
+    """
+    return parse_grupa_details(html_content)
