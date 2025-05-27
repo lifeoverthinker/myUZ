@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from scraper.scrapers.kierunki_scraper import scrape_kierunki
 from scraper.scrapers.grupy_scraper import scrape_grupy_for_kierunki
 from scraper.parsers.grupy_parser import parse_ics
@@ -14,9 +16,6 @@ from scraper.parsers.nauczyciel_parser import scrape_nauczyciele_from_grupy, par
 from scraper.scrapers.nauczyciel_scraper import scrape_nauczyciel_and_zajecia
 
 def enrich_nauczyciele_with_details(nauczyciele: list[dict]) -> list[dict]:
-    """
-    Uzupełnia listę nauczycieli o szczegóły (email, instytut, linki) pobrane ze strony nauczyciela.
-    """
     enriched = []
     for n in nauczyciele:
         nauczyciel_id = n.get("nauczyciel_id")
@@ -30,38 +29,53 @@ def enrich_nauczyciele_with_details(nauczyciele: list[dict]) -> list[dict]:
         enriched.append(n)
     return enriched
 
+def fetch_nauczyciele_and_zajecia_parallel(nauczyciele, max_workers=20):
+    results = []
+    nauczyciel_ids = [n.get("nauczyciel_id") for n in nauczyciele if n.get("nauczyciel_id")]
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(scrape_nauczyciel_and_zajecia, nid): nid for nid in nauczyciel_ids}
+        for future in as_completed(futures):
+            nid = futures[future]
+            try:
+                dane = future.result()
+                if dane and "zajecia" in dane:
+                    for z in dane["zajecia"]:
+                        z["nauczyciel_id"] = nid
+                    results.append(dane)
+                    print(f"Pobrano {len(dane['zajecia'])} zajęć dla nauczyciela {nid}")
+                else:
+                    print(f"Nie udało się pobrać żadnych zajęć dla nauczyciela {nid}")
+            except Exception as e:
+                print(f"❌ Błąd pobierania ICS nauczyciela {nid}: {e}")
+    return results
+
 def main() -> None:
-    """
-    Kompletny pipeline pobierania, przetwarzania i zapisu danych do bazy.
-    """
-    # ETAP 1: Pobieranie kierunków studiów
     print("ETAP 1: Pobieranie kierunków studiów...")
     kierunki = scrape_kierunki()
     save_kierunki(kierunki)
     print(f"Przetworzono {len(kierunki)} kierunków\n")
     kierunek_uuid_map = get_uuid_map("kierunki", "kierunek_id", "id")
 
-    # ETAP 2: Pobieranie grup dla kierunków
     print("ETAP 2: Pobieranie grup dla kierunków...")
     wszystkie_grupy = scrape_grupy_for_kierunki(kierunki)
     save_grupy(wszystkie_grupy, kierunek_uuid_map)
     print(f"Przetworzono {len(wszystkie_grupy)} grup z {len(kierunki)} kierunków\n")
     grupa_uuid_map = get_uuid_map("grupy", "grupa_id", "id")
 
-    # ETAP 2.5: Pobieranie nauczycieli z planów grup + szczegóły
-    print("ETAP 2.5: Pobieranie nauczycieli z planów grup...")
+    print("ETAP 2.5: Pobieranie nauczycieli z planów grup + szczegóły")
     nauczyciele = scrape_nauczyciele_from_grupy(wszystkie_grupy)
     nauczyciele = enrich_nauczyciele_with_details(nauczyciele)
     save_nauczyciele(nauczyciele, grupa_uuid_map)
     print(f"Przetworzono {len(nauczyciele)} nauczycieli\n")
-    nauczyciel_uuid_map = get_uuid_map("nauczyciele", "nauczyciel_nazwa", "id")
+    nauczyciel_uuid_map = get_uuid_map("nauczyciele", "nauczyciel_id", "id")
 
-    # ETAP 3: Pobieranie i zapisywanie zajęć do bazy
+    # KLUCZOWA MAPA: kod_grupy -> grupa_id
+    kod_grupy_to_grupa_id = {g["kod_grupy"]: g["grupa_id"] for g in wszystkie_grupy if g.get("kod_grupy") and g.get("grupa_id")}
+
     print("ETAP 3: Pobieranie i zapisywanie zajęć do bazy...")
     wszystkie_grupa_ids = [grupa["grupa_id"] for grupa in wszystkie_grupy if grupa.get("grupa_id")]
     grupa_map = {g["grupa_id"]: g for g in wszystkie_grupy if g.get("grupa_id")}
 
-    # Pobierz ICSy grup
     wyniki = download_ics_for_groups_async(wszystkie_grupa_ids)
     wszystkie_zajecia = []
 
@@ -83,28 +97,19 @@ def main() -> None:
         else:
             print(f"❌ Błąd pobierania ICS: {w['link_ics_zrodlowy']}")
 
-    # Zajęcia z ICS nauczycieli
-    print("ETAP 3.1: Pobieranie zajęć z ICS nauczycieli...")
-    for nauczyciel in nauczyciele:
-        nauczyciel_id = nauczyciel.get("nauczyciel_id")
-        if not nauczyciel_id:
-            continue
-        try:
-            dane = scrape_nauczyciel_and_zajecia(nauczyciel_id)
-            if dane is not None and "zajecia" in dane:
-                wszystkie_zajecia.extend(dane["zajecia"])
-                print(f"Pobrano {len(dane['zajecia'])} zajęć dla nauczyciela {nauczyciel_id}")
-            else:
-                print(f"Nie udało się pobrać żadnych zajęć dla nauczyciela {nauczyciel_id}")
-        except Exception as e:
-            print(f"❌ Błąd pobierania ICS nauczyciela {nauczyciel_id}: {e}")
+    # Zajęcia z ICS nauczycieli (równolegle)
+    print("ETAP 3.1: Pobieranie zajęć z ICS nauczycieli (równolegle)...")
+    nauczyciel_results = fetch_nauczyciele_and_zajecia_parallel(nauczyciele, max_workers=20)
+    for dane in nauczyciel_results:
+        for z in dane["zajecia"]:
+            # Mapowanie kod_grupy -> grupa_id (dla relacji grupowej)
+            if not z.get("grupa_id") and z.get("kod_grupy"):
+                z["grupa_id"] = kod_grupy_to_grupa_id.get(z["kod_grupy"])
+            wszystkie_zajecia.append(z)
 
     print(f"Łącznie pobrano {len(wszystkie_zajecia)} zajęć.")
 
-    # Deduplikacja i serializacja
     wszystkie_zajecia = zajecia_to_serializable(wszystkie_zajecia)
-
-    # Zapis do bazy (deduplikacja i relacje w db.py)
     save_zajecia(wszystkie_zajecia, grupa_uuid_map, nauczyciel_uuid_map)
     print("Zajęcia zapisane do bazy!")
     print("\nZakończono proces testowy.")

@@ -55,10 +55,6 @@ def remove_duplicates_grupy(grupy):
     return unique
 
 def save_grupy(grupy, kierunek_uuid_map, batch_size=1000):
-    """
-    Batchowy upsert grup po (kod_grupy, kierunek_id) – zgodnie z constraintem uniq_grupa!
-    Pole grupa_id zawsze zostaje oryginalnym ID z UZ!
-    """
     if not grupy:
         return []
     grupy = remove_duplicates_grupy(grupy)
@@ -168,15 +164,14 @@ def save_zajecia(events, grupa_uuid_map, nauczyciel_uuid_map, batch_size=1000):
         return 0
     events = deduplicate_events(events)
     total = 0
-    # Najpierw upsert batcha zajęć po UID (unikalny tekst)
     for batch_i, batch in enumerate(chunks(events, batch_size), 1):
         batch_data = []
         for event in batch:
             if is_dataclass(event):
                 event = asdict(event)
             grupa_uuid = grupa_uuid_map.get(str(event.get('grupa_id'))) or grupa_uuid_map.get(str(event.get('kod_grupy')))
-            nauczyciel_nazwa = event.get('nauczyciel_nazwa') or event.get('nauczyciel')
-            nauczyciel_uuid = nauczyciel_uuid_map.get(nauczyciel_nazwa) if nauczyciel_nazwa else None
+            nauczyciel_id = event.get('nauczyciel_id')  # KLUCZOWA ZMIANA: po nauczyciel_id!
+            nauczyciel_uuid = nauczyciel_uuid_map.get(nauczyciel_id) if nauczyciel_id else None
             event['grupa_id'] = grupa_uuid
             event['nauczyciel_id'] = nauczyciel_uuid
             batch_data.append(truncate_fields(event))
@@ -191,7 +186,6 @@ def save_zajecia(events, grupa_uuid_map, nauczyciel_uuid_map, batch_size=1000):
     result = supabase.table('zajecia').select('uid, id').execute()
     uid_to_id_map = {row['uid']: row['id'] for row in result.data}
 
-    # Tworzenie relacji
     relacje_grupy = []
     relacje_nauczyciele = []
     for event in events:
@@ -199,14 +193,13 @@ def save_zajecia(events, grupa_uuid_map, nauczyciel_uuid_map, batch_size=1000):
         if not uuid_id:
             continue
         grupa_uuid = grupa_uuid_map.get(str(event.get('grupa_id'))) or grupa_uuid_map.get(str(event.get('kod_grupy')))
-        nauczyciel_nazwa = event.get('nauczyciel_nazwa') or event.get('nauczyciel')
-        nauczyciel_uuid = nauczyciel_uuid_map.get(nauczyciel_nazwa) if nauczyciel_nazwa else None
+        nauczyciel_id = event.get('nauczyciel_id')
+        nauczyciel_uuid = nauczyciel_uuid_map.get(nauczyciel_id) if nauczyciel_id else None
         if grupa_uuid:
             relacje_grupy.append({'zajecia_id': uuid_id, 'grupa_id': grupa_uuid})
         if nauczyciel_uuid:
             relacje_nauczyciele.append({'zajecia_id': uuid_id, 'nauczyciel_id': nauczyciel_uuid})
 
-    # Upsert relacji
     if relacje_grupy:
         try:
             supabase.table('zajecia_grupy').upsert(relacje_grupy, on_conflict='zajecia_id,grupa_id').execute()
