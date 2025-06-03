@@ -3,6 +3,9 @@ from icalendar import Calendar
 import re
 from typing import Tuple, List, Dict, Optional, Any
 
+
+# --- Sekcja: Parsowanie ICS grupy ---
+
 def wyodrebnij_dane_z_summary_grupa(summary: str) -> Tuple[str, Optional[str], Optional[str]]:
     """
     Ekstrahuje przedmiot, nauczyciela i podgrupę (PG) z opisu ICS GRUPY.
@@ -10,7 +13,6 @@ def wyodrebnij_dane_z_summary_grupa(summary: str) -> Tuple[str, Optional[str], O
     przedmiot = summary
     nauczyciel = None
     pg = None
-
     match = re.search(r"^(.*?)\s*\([^\)]+\):\s*(.+?)(?:\s*\(PG:.*\))?$", summary)
     if match:
         przedmiot = match.group(1).strip()
@@ -20,17 +22,18 @@ def wyodrebnij_dane_z_summary_grupa(summary: str) -> Tuple[str, Optional[str], O
     pg_match = re.search(r"\(PG:\s*([^)]+)\)", summary)
     if pg_match:
         pg = pg_match.group(1).strip()
-        if nauczyciel:
-            nauczyciel = re.sub(r"\(PG:.*?\)", "", nauczyciel).strip()
+    if nauczyciel:
+        nauczyciel = re.sub(r"\(PG:.*?\)", "", nauczyciel).strip()
     return przedmiot, nauczyciel, pg
 
+
 def parse_ics(
-    ics_content: str,
-    grupa_id: Optional[str] = None,
-    ics_url: Optional[str] = None,
-    kod_grupy: Optional[str] = None,
-    kierunek_nazwa: Optional[str] = None,
-    grupa_map: Optional[Dict[str, Any]] = None,
+        ics_content: str,
+        grupa_id: Optional[str] = None,
+        ics_url: Optional[str] = None,
+        kod_grupy: Optional[str] = None,
+        kierunek_nazwa: Optional[str] = None,
+        grupa_map: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Parsuje plik ICS grupy i zwraca listę wydarzeń (zajęć).
@@ -47,6 +50,7 @@ def parse_ics(
             end_time = component.get('dtend').dt
             location = str(component.get('location', ''))
             uid = str(component.get('uid', ''))
+
             # RZ z kategorii
             rz = None
             if categories:
@@ -59,7 +63,9 @@ def parse_ics(
                         rz = rz[:10]
                 except Exception:
                     rz = None
+
             przedmiot, nauczyciel, podgrupa = wyodrebnij_dane_z_summary_grupa(summary)
+
             event = {
                 "przedmiot": przedmiot,
                 "od": start_time.isoformat() if hasattr(start_time, "isoformat") else start_time,
@@ -72,51 +78,69 @@ def parse_ics(
                 "nauczyciel_nazwa": nauczyciel,
                 "kod_grupy": kod_grupy,
                 "kierunek_nazwa": kierunek_nazwa,
-                "grupa_id": grupa_id,
-                "source_type": "ICS_GRUPA"
+                "grupa_id": grupa_id
             }
             events.append(event)
     except Exception as e:
         print(f"Błąd podczas parsowania pliku ICS: {e}")
     return events
 
+
+# --- Sekcja: Parsowanie szczegółów grupy z HTML ---
+
 def parse_grupa_details(html_content: str) -> Dict[str, Any]:
     """
-    Parsuje HTML planu zajęć grupy, wyciągając kod grupy, tryb studiów, semestr i nazwę kierunku.
+    Parsuje HTML planu zajęć grupy, wyciągając kod grupy, tryb studiów i semestr.
     """
     soup = BeautifulSoup(html_content, 'html.parser')
+
+    # Sekcja: Kod grupy z drugiego H2 (Figma: Nagłówek grupy - np. 21F-ANG-SD23)
     h2_elements = soup.find_all('h2')
-    kod_grupy = h2_elements[1].text.strip() if len(h2_elements) > 1 else "Nieznany"
+    kod_grupy = ""
+    if len(h2_elements) >= 2:
+        kod_grupy = h2_elements[1].get_text(strip=True)
+
+    # Sekcja: Informacje z H3 (Figma: Szczegóły kierunku, trybu i semestru)
     h3 = soup.find('h3')
     kierunek_nazwa = None
     tryb_studiow = None
     semestr = None
 
     if h3:
-        # Pobierz wszystkie linie z <h3>, rozdzielone <br>
-        lines = [line.strip() for line in h3.stripped_strings if line.strip()]
-        if lines:
-            kierunek_nazwa = lines[0]
-            # Szukaj trybu studiów w drugiej linii (np. "stacjonarne / pierwszego stopnia z tyt. inżyniera")
-            if len(lines) > 1:
-                tryb_studiow = lines[1].split("/")[0].strip().lower()
-            # Szukaj semestru w trzeciej linii (np. "semestr letni 2024/2025")
-            if len(lines) > 2:
-                sem_line = lines[2].lower()
-                if "letni" in sem_line:
-                    semestr = "letni"
-                elif "zimowy" in sem_line:
-                    semestr = "zimowy"
+        # Pobierz HTML zawartość H3 i podziel po <br>
+        h3_html = str(h3)
+
+        # Podziel zawartość po <br> i <br />
+        import re
+        parts = re.split(r'<br\s*/?>', h3_html, flags=re.IGNORECASE)
+
+        # Pierwsza część: nazwa kierunku (przed pierwszym <br>)
+        if len(parts) > 0:
+            kierunek_nazwa = BeautifulSoup(parts[0], 'html.parser').get_text(strip=True)
+
+        # Druga część: tryb studiów (po pierwszym <br>)
+        if len(parts) > 1:
+            druga_czesc = BeautifulSoup(parts[1], 'html.parser').get_text(strip=True)
+
+            # Sprawdź czy zawiera "stacjonarne" czy "niestacjonarne"
+            if 'niestacjonarne' in druga_czesc.lower():
+                tryb_studiow = 'niestacjonarne'
+            elif 'stacjonarne' in druga_czesc.lower():
+                tryb_studiow = 'stacjonarne'
+
+        # Trzecia część: semestr (po drugim <br>) - tylko słowo "letni" lub "zimowy"
+        if len(parts) > 2:
+            trzecia_czesc = BeautifulSoup(parts[2], 'html.parser').get_text(strip=True)
+            if 'letni' in trzecia_czesc.lower():
+                semestr = 'letni'
+            elif 'zimowy' in trzecia_czesc.lower():
+                semestr = 'zimowy'
+
+    print(f"  Parser: kod='{kod_grupy}', tryb='{tryb_studiow}', semestr='{semestr}', kierunek='{kierunek_nazwa}'")
 
     return {
         "kod_grupy": kod_grupy,
-        "kierunek_nazwa": kierunek_nazwa,
         "tryb_studiow": tryb_studiow,
-        "semestr": semestr
+        "semestr": semestr,
+        "kierunek_nazwa": kierunek_nazwa
     }
-
-def parsuj_html_grupa(html_content: str) -> Dict[str, Any]:
-    """
-    Wrapper do wyciągania szczegółów grupy z HTML (dla scraperów).
-    """
-    return parse_grupa_details(html_content)

@@ -2,6 +2,7 @@ import requests
 import datetime
 import time
 
+
 def sanitize_string(text: str) -> str:
     """
     Oczyszcza string z niedrukowalnych znaków i nieprawidłowych kodowań.
@@ -10,6 +11,7 @@ def sanitize_string(text: str) -> str:
         return ""
     polish_chars = "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ"
     return "".join(c for c in str(text) if c.isprintable() or c in polish_chars)
+
 
 def fetch_page(url: str, max_retries: int = 3, sleep_time: float = 2) -> str:
     """
@@ -27,10 +29,12 @@ def fetch_page(url: str, max_retries: int = 3, sleep_time: float = 2) -> str:
     # Wszystkie próby się nie powiodły:
     return None
 
+
 def zajecia_to_serializable(zajecia: list) -> list:
     """
     Zamienia obiekty zajęć na słowniki serializowalne do JSON (np. datetime na string).
     """
+
     def convert(obj):
         if isinstance(obj, dict):
             return {k: convert(v) for k, v in obj.items()}
@@ -42,4 +46,5 @@ def zajecia_to_serializable(zajecia: list) -> list:
             return obj.isoformat()
         else:
             return obj
+
     return [convert(z) for z in zajecia]

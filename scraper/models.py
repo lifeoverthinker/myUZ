@@ -1,78 +1,58 @@
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 
+
+# Kierunek
 @dataclass
 class Kierunek:
-    """Model reprezentujący kierunek studiów."""
-    kierunek_id: str
-    nazwa_kierunku: str
+    nazwa: str
     wydzial: str
-    link_strony_kierunku: str
-    czy_podyplomowe: bool = False  # Dodane pole: czy to studia podyplomowe
 
-    @classmethod
-    def from_dict(cls, data: dict) -> 'Kierunek':
-        return cls(**data)
 
+# Grupa
 @dataclass
 class Grupa:
-    """Model reprezentujący grupę studencką."""
-    grupa_id: str
     kod_grupy: str
-    kierunek_id: str
-    semestr: Optional[str]
-    tryb_studiow: Optional[str]
-    link_grupy: str
-    link_ics_grupy: Optional[str]
+    kierunek_id: str  # uuid (FK)
+    link_strony_grupy: Optional[str] = None
+    link_ics_grupy: Optional[str] = None
+    tryb_studiow: Optional[str] = None
 
-    @classmethod
-    def from_dict(cls, data: dict) -> 'Grupa':
-        return cls(**data)
 
+# Nauczyciel
 @dataclass
 class Nauczyciel:
-    """Model reprezentujący nauczyciela akademickiego."""
-    nauczyciel_id: str
-    nauczyciel_nazwa: Optional[str] = None
+    nazwa: str
     instytut: Optional[str] = None
     email: Optional[str] = None
-    link_plan_nauczyciela: Optional[str] = None
     link_strony_nauczyciela: Optional[str] = None
+    link_ics_nauczyciela: Optional[str] = None
 
-    @classmethod
-    def from_dict(cls, data: dict) -> 'Nauczyciel':
-        return cls(**data)
 
+# Zajęcia grupy
 @dataclass
-class Zajecia:
-    """Model reprezentujący pojedyncze zajęcia."""
-    zajecia_id: Optional[str] = None
-    przedmiot: Optional[str] = None
-    od: Optional[datetime] = None
-    do_: Optional[datetime] = None
-    miejsce: Optional[str] = None
-    rz: Optional[str] = None  # rodzaj zajęć
+class ZajeciaGrupy:
+    uid: str
+    podgrupa: Optional[str]
+    od: str  # ISO datetime string lub datetime
+    do_: str
+    przedmiot: str
+    rz: Optional[str]
+    nauczyciel: Optional[str]
+    miejsce: Optional[str]
+    grupa_id: str  # uuid (FK)
     link_ics_zrodlowy: Optional[str] = None
-    podgrupa: Optional[str] = None
-    uid: Optional[str] = None
-    source_type: Optional[str] = None
-    nauczyciel_nazwa: Optional[str] = None
-    kod_grupy: Optional[str] = None
-    kierunek_nazwa: Optional[str] = None
-    grupa_id: Optional[str] = None
-    nauczyciel_id: Optional[str] = None
 
-    @classmethod
-    def from_dict(cls, data: dict) -> 'Zajecia':
-        # Konwersja dat do odpowiedniego formatu jeśli potrzeba
-        od = data.get('od')
-        do_ = data.get('do_')
-        if isinstance(od, str):
-            od = datetime.fromisoformat(od)
-        if isinstance(do_, str):
-            do_ = datetime.fromisoformat(do_)
-        data = dict(data)
-        data['od'] = od
-        data['do_'] = do_
-        return cls(**data)
+
+# Zajęcia nauczyciela
+@dataclass
+class ZajeciaNauczyciela:
+    uid: str
+    od: str
+    do_: str
+    przedmiot: str
+    rz: Optional[str]
+    grupy: Optional[str]
+    miejsce: Optional[str]
+    nauczyciel_id: str  # uuid (FK)
+    link_ics_zrodlowy: Optional[str] = None

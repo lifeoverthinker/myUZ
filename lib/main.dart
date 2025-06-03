@@ -1,24 +1,33 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_svg/flutter_svg.dart';
-
 import 'screens/home.dart';
 import 'screens/calendar.dart';
 import 'screens/index.dart';
 import 'screens/profile.dart';
 import 'theme/fonts.dart';
+import 'my_uz_icons.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:device_preview/device_preview.dart';
 
-Future<void> main() async {
+Future main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(); // domyślnie szuka .env w katalogu głównym
-
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+      systemNavigationBarColor: Colors.white,
+      systemNavigationBarIconBrightness: Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ),
+  );
+  await dotenv.load();
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_KEY']!,
   );
-
+  //runApp(DevicePreview(builder: (context) => const MyApp()));
   runApp(const MyApp());
 }
 
@@ -28,20 +37,20 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Aplikacja Flutter',
+      title: 'MyUZ',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
+        fontFamily: 'Inter',
       ),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [
-        Locale('pl', 'PL'),
-      ],
+      supportedLocales: const [Locale('pl', 'PL')],
       home: const MainScreen(),
+      builder: DevicePreview.appBuilder,
     );
   }
 }
@@ -55,11 +64,35 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    CalendarScreen(),
+  final ScrollController _scrollController = ScrollController();
+
+  // Stan motywu i dark mode
+  int _selectedTheme = 0;
+  bool _isDarkMode = false;
+
+  List<Widget> get _screens => [
+    const HomeScreen(),
+    const CalendarScreen(),
     IndexScreen(),
-    ProfileScreen(),
+    ProfileScreen(
+      selectedTheme: _selectedTheme,
+      isDarkMode: _isDarkMode,
+      onThemeSelected: (int idx) {
+        setState(() {
+          _selectedTheme = idx;
+        });
+      },
+      onDarkModeChanged: (bool value) {
+        setState(() {
+          _isDarkMode = value;
+        });
+      },
+      onStudentDataTap: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Dane studenta')),
+        );
+      },
+    ),
   ];
 
   void _onItemTapped(int index) {
@@ -69,103 +102,88 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final Color bottomNavSelectedColor = const Color(0xFF381E72);
-    final Color bottomNavUnselectedColor = const Color(0xFF787579);
-    final Color bottomNavStrokeColor = const Color(0xFFEDE6F3);
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
+  @override
+  Widget build(BuildContext context) {
+    const selectedColor = Color(0xFF381E72);
+    const unselectedColor = Color(0xFF787579);
+    const borderColor = Color(0xFFEDE6F3);
+    final navItems = [
+      {'icon': MyUZicons.home, 'label': 'Główna'},
+      {'icon': MyUZicons.calendar_check, 'label': 'Kalendarz'},
+      {'icon': MyUZicons.graduation_hat, 'label': 'Indeks'},
+      {'icon': MyUZicons.user, 'label': 'Konto'},
+    ];
     return Scaffold(
-      body: _screens[_selectedIndex],
+      body: NotificationListener<ScrollNotification>(
+        onNotification: (scrollNotification) {
+          return false;
+        },
+        child: _wrapWithScrollController(_screens[_selectedIndex]),
+      ),
       bottomNavigationBar: Container(
-        margin: EdgeInsets.zero,
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(
-              color: bottomNavStrokeColor,
-              width: 1,
-            ),
-          ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: borderColor, width: 1)),
         ),
-        child: Theme(
-          data: Theme.of(context).copyWith(
-            splashColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-          ),
-          child: BottomNavigationBar(
-            type: BottomNavigationBarType.fixed,
-            selectedLabelStyle: AppTextStyles.navigationLabel(context).copyWith(height: 1.0),
-            unselectedLabelStyle: AppTextStyles.navigationLabel(context).copyWith(height: 1.0),
-            backgroundColor: Theme.of(context).colorScheme.surface,
-            selectedItemColor: bottomNavSelectedColor,
-            unselectedItemColor: bottomNavUnselectedColor,
-            showUnselectedLabels: true,
-            iconSize: 24,
-            elevation: 0,
-            items: [
-              BottomNavigationBarItem(
-                icon: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 38, vertical: 8),
-                  child: SvgPicture.asset(
-                    'assets/icons/home.svg',
-                    height: 24,
-                    colorFilter: ColorFilter.mode(
-                      _selectedIndex == 0 ? bottomNavSelectedColor : bottomNavUnselectedColor,
-                      BlendMode.srcIn,
+        padding: const EdgeInsets.only(top: 8, bottom: 16),
+        height: 72,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: List.generate(navItems.length, (i) {
+            final isSelected = i == _selectedIndex;
+            return Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _onItemTapped(i),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: Icon(
+                        navItems[i]['icon'] as IconData,
+                        size: 24,
+                        color: isSelected ? selectedColor : unselectedColor,
+                      ),
                     ),
-                  ),
-                ),
-                label: 'Strona główna',
-              ),
-              BottomNavigationBarItem(
-                icon: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 38, vertical: 8),
-                  child: SvgPicture.asset(
-                    'assets/icons/calendar-check.svg',
-                    height: 24,
-                    colorFilter: ColorFilter.mode(
-                      _selectedIndex == 1 ? bottomNavSelectedColor : bottomNavUnselectedColor,
-                      BlendMode.srcIn,
+                    Text(
+                      navItems[i]['label'] as String,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.navigationLabel(context).copyWith(
+                        color: isSelected ? selectedColor : unselectedColor,
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-                label: 'Kalendarz',
               ),
-              BottomNavigationBarItem(
-                icon: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 38, vertical: 8),
-                  child: SvgPicture.asset(
-                    'assets/icons/graduation-hat.svg',
-                    height: 24,
-                    colorFilter: ColorFilter.mode(
-                      _selectedIndex == 2 ? bottomNavSelectedColor : bottomNavUnselectedColor,
-                      BlendMode.srcIn,
-                    ),
-                  ),
-                ),
-                label: 'Indeks',
-              ),
-              BottomNavigationBarItem(
-                icon: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 38, vertical: 8),
-                  child: SvgPicture.asset(
-                    'assets/icons/user.svg',
-                    height: 24,
-                    colorFilter: ColorFilter.mode(
-                      _selectedIndex == 3 ? bottomNavSelectedColor : bottomNavUnselectedColor,
-                      BlendMode.srcIn,
-                    ),
-                  ),
-                ),
-                label: 'Profil',
-              ),
-            ],
-            currentIndex: _selectedIndex,
-            onTap: _onItemTapped,
-            landscapeLayout: BottomNavigationBarLandscapeLayout.centered,
-            enableFeedback: true,
-          ),
+            );
+          }),
         ),
       ),
     );
+  }
+
+  Widget _wrapWithScrollController(Widget screen) {
+    if (screen is HomeScreen ||
+        screen is CalendarScreen ||
+        screen is IndexScreen ||
+        screen is ProfileScreen) {
+      return Builder(
+        builder: (context) => PrimaryScrollController(
+          controller: _scrollController,
+          child: screen,
+        ),
+      );
+    }
+    return screen;
   }
 }

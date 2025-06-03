@@ -1,43 +1,26 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import '../theme/fonts.dart';
-import '../components/ZajeciaCard.dart';
-import '../components/ZadaniaCard.dart';
-import '../components/WydarzeniaCard.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../components/cards/ZajeciaCard.dart';
+import '../components/cards/ZadaniaCard.dart';
+import '../components/cards/WydarzeniaCard.dart';
+import '../services/supabase_service.dart';
+import '../my_uz_icons.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late final SupabaseClient supabase;
+  final SupabaseService _supabaseService = SupabaseService();
   late Future<List<Map<String, dynamic>>> zajeciaFuture;
 
   @override
   void initState() {
     super.initState();
-    supabase = SupabaseClient(
-      dotenv.env['SUPABASE_URL']!,
-      dotenv.env['SUPABASE_KEY']!, // Poprawny klucz!
-    );
-    zajeciaFuture = fetchNajblizszeZajecia();
-  }
-
-  Future<List<Map<String, dynamic>>> fetchNajblizszeZajecia() async {
-    final response = await supabase
-        .from('zajecia')
-        .select('przedmiot, od, do_, miejsce, kod_grupy, rz')
-        .eq('kod_grupy', '23INF-SP')
-        .eq('podgrupa', 'A')
-        .order('od', ascending: true)
-        .limit(5);
-    if (response == null) return [];
-    return List<Map<String, dynamic>>.from(response);
+    zajeciaFuture = _supabaseService.fetchNajblizszeZajecia();
   }
 
   @override
@@ -59,14 +42,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildTopSection(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
             _getCurrentDate(),
-            style: AppTextStyles.bodyMedium(context).copyWith(color: const Color(0xFF1D192B)),
+            style: AppTextStyles.dateTopSectionText(context),
           ),
           Row(
             children: [
@@ -80,10 +63,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 child: IconButton(
-                  icon: SvgPicture.asset(
-                    'assets/icons/map.svg',
-                    height: 24,
-                    width: 24,
+                  icon: const Icon(
+                    MyUZicons.map,
+                    color: Color(0xFF1D192B),
+                    size: 24,
                   ),
                   onPressed: () {},
                 ),
@@ -101,10 +84,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     child: IconButton(
-                      icon: SvgPicture.asset(
-                        'assets/icons/mail.svg',
-                        height: 24,
-                        width: 24,
+                      icon: const Icon(
+                        MyUZicons.mail,
+                        color: Color(0xFF1D192B),
+                        size: 24,
                       ),
                       onPressed: () {},
                     ),
@@ -136,17 +119,13 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.all(16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Cześć, Martyna 👋',
-            style: AppTextStyles.displayLarge(context).copyWith(color: const Color(0xFF1D192B)),
-          ),
+          Text('Cześć, Martyna 👋', style: AppTextStyles.welcomeText(context)),
           const SizedBox(height: 4),
           Text(
             'UZ, Wydział Informatyki',
-            style: AppTextStyles.labelMedium(context).copyWith(color: const Color(0xFF363535)),
+            style: AppTextStyles.kierunekText(context),
           ),
         ],
       ),
@@ -154,11 +133,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildFooter(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Text(
-        'Stopka 2025',
-        style: AppTextStyles.bodyMedium(context).copyWith(color: const Color(0xFF787579)),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Stopka 2025', style: AppTextStyles.footerText(context)),
+        ],
       ),
     );
   }
@@ -192,6 +174,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${weekdays[weekdayIndex]}, ${now.day} ${months[now.month - 1]}';
   }
 
+  String _formatTime(dynamic od, dynamic do_) {
+    if (od == null || do_ == null) return '';
+    try {
+      final start = TimeOfDay.fromDateTime(DateTime.parse(od.toString()));
+      final end = TimeOfDay.fromDateTime(DateTime.parse(do_.toString()));
+      return '${start.format(context)} - ${end.format(context)}';
+    } catch (e) {
+      return '';
+    }
+  }
+
   Widget _buildMainSection(BuildContext context) {
     return Container(
       width: double.infinity,
@@ -209,6 +202,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _buildClassesSection(context),
             _buildTasksSection(context),
             _buildEventsSection(context),
+            const SizedBox(height: 10),
             _buildFooter(context),
           ],
         ),
@@ -218,21 +212,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildClassesSection(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 24, left: 16, right: 16, bottom: 12),
+      padding: const EdgeInsets.only(top: 24, left: 16, right: 0, bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              SvgPicture.asset(
-                'assets/icons/calendar-check.svg',
-                height: 20,
-                width: 20,
+              const Icon(
+                MyUZicons.calendar_check,
+                color: Color(0xFF1D192B),
+                size: 20,
               ),
               const SizedBox(width: 8),
               Text(
                 'Najbliższe zajęcia',
-                style: AppTextStyles.titleLarge(context),
+                style: AppTextStyles.sectionHeader(context),
               ),
             ],
           ),
@@ -246,41 +240,29 @@ class _HomeScreenState extends State<HomeScreen> {
               if (snapshot.hasError) {
                 return Text('Błąd: ${snapshot.error}');
               }
-              if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                return const Text('Brak zajęć grupowych');
+              final zajecia = snapshot.data ?? [];
+              if (zajecia.isEmpty) {
+                return const Text('Brak nadchodzących zajęć');
               }
-              final zajecia = snapshot.data!;
               return SingleChildScrollView(
+                padding: const EdgeInsets.only(right: 16),
                 scrollDirection: Axis.horizontal,
                 child: Row(
-                  children: zajecia.map((zajecie) {
-                    final title = zajecie['przedmiot'] ?? '';
-                    final od = zajecie['od'] != null
-                        ? TimeOfDay.fromDateTime(DateTime.parse(zajecie['od']))
-                        : null;
-                    final do_ = zajecie['do_'] != null
-                        ? TimeOfDay.fromDateTime(DateTime.parse(zajecie['do_']))
-                        : null;
-                    final time = od != null && do_ != null
-                        ? '${od.format(context)} - ${do_.format(context)}'
-                        : '';
-                    final room = zajecie['miejsce'] ?? '';
-                    final avatarText = (zajecie['rz'] ?? '').isNotEmpty
-                        ? zajecie['rz'][0].toUpperCase()
-                        : '?';
-                    final backgroundColor = const Color(0xFFE8DEF8);
-
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ZajeciaCard(
-                        title: title,
-                        time: time,
-                        room: room,
-                        avatarText: avatarText,
-                        backgroundColor: backgroundColor,
+                  children: [
+                    for (int i = 0; i < zajecia.length; i++) ...[
+                      ZajeciaCard(
+                        title: zajecia[i]['przedmiot']?.toString() ?? '',
+                        time: _formatTime(zajecia[i]['od'], zajecia[i]['do_']),
+                        room: zajecia[i]['miejsce']?.toString() ?? '',
+                        avatarText:
+                            (zajecia[i]['rz']?.toString() ?? '').isNotEmpty
+                                ? zajecia[i]['rz'][0].toUpperCase()
+                                : '?',
+                        backgroundColor: const Color(0xFFE8DEF8),
                       ),
-                    );
-                  }).toList(),
+                      if (i != zajecia.length - 1) const SizedBox(width: 8),
+                    ],
+                  ],
                 ),
               );
             },
@@ -292,23 +274,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildTasksSection(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.only(top: 12, left: 16, right: 0, bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              SvgPicture.asset(
-                'assets/icons/book-open.svg',
-                height: 20,
-                width: 20,
+              const Icon(
+                MyUZicons.book_open,
+                color: Color(0xFF1D192B),
+                size: 20,
               ),
               const SizedBox(width: 8),
-              Text('Zadania', style: AppTextStyles.titleLarge(context)),
+              Text('Zadania', style: AppTextStyles.sectionHeader(context)),
             ],
           ),
           const SizedBox(height: 12),
           SingleChildScrollView(
+            padding: const EdgeInsets.only(right: 16),
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
@@ -335,23 +318,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildEventsSection(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.only(top: 12, left: 16, right: 0, bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              SvgPicture.asset(
-                'assets/icons/marker-pin.svg',
-                height: 20,
-                width: 20,
+              const Icon(
+                MyUZicons.marker_pin,
+                color: Color(0xFF1D192B),
+                size: 20,
               ),
               const SizedBox(width: 8),
-              Text('Wydarzenia', style: AppTextStyles.titleLarge(context)),
+              Text('Wydarzenia', style: AppTextStyles.sectionHeader(context)),
             ],
           ),
           const SizedBox(height: 12),
           SingleChildScrollView(
+            padding: const EdgeInsets.only(right: 16),
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [

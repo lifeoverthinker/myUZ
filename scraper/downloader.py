@@ -1,22 +1,20 @@
 import aiohttp
 import asyncio
-import time
-
-from scraper.utils import fetch_page
 
 BASE_URL = "https://plan.uz.zgora.pl/"
 
+
 async def fetch_ics_with_fallback(session: aiohttp.ClientSession, grupa_id: str, max_retries: int = 3) -> dict:
     """
-    Próbuj pobrać ICS dla grupy w kolejności:
-    1. ...&S=0 (zimowy)
-    2. ...&S=1 (letni)
-    3. bez &S (aktualny lub ogólny)
+    Pobiera ICS-y dla grupy w kolejności:
+    1. ...&s=0 (letni)
+    2. ...&s=1 (zimowy)
+    3. bez &s (domyślny)
     Zwraca dict: {'status', 'ics_content', 'link_ics_zrodlowy', 'grupa_id'}
     """
     urls = [
-        f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG&S=0",
-        f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG&S=1",
+        f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG&s=0",
+        f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG&s=1",
         f"{BASE_URL}grupy_ics.php?ID={grupa_id}&KIND=GG"
     ]
     for url in urls:
@@ -25,7 +23,7 @@ async def fetch_ics_with_fallback(session: aiohttp.ClientSession, grupa_id: str,
                 async with session.get(url, timeout=15) as resp:
                     if resp.status == 200:
                         text = await resp.text()
-                        if text.strip().startswith("BEGIN:VCALENDAR"):
+                        if text.strip().startswith("BEGIN:VCALENDAR") and "VEVENT" in text:
                             return {
                                 'status': 'success',
                                 'ics_content': text,
@@ -38,7 +36,7 @@ async def fetch_ics_with_fallback(session: aiohttp.ClientSession, grupa_id: str,
                         break  # przejdź do kolejnego url
                     else:
                         await asyncio.sleep(1)
-            except Exception as e:
+            except Exception:
                 if attempt < max_retries - 1:
                     await asyncio.sleep(1)
                 else:
@@ -51,9 +49,10 @@ async def fetch_ics_with_fallback(session: aiohttp.ClientSession, grupa_id: str,
         'grupa_id': grupa_id
     }
 
-async def fetch_all_ics(grupa_ids: list[str], max_concurrent: int = 20) -> list[dict]:
+
+async def fetch_all_ics(grupa_ids: list[str], max_concurrent: int = 100) -> list[dict]:
     """
-    Asynchronicznie pobiera ICSy dla wszystkich grup.
+    Asynchronicznie pobiera ICS-y dla wszystkich grup.
     """
     results = []
     sema = asyncio.Semaphore(max_concurrent)
@@ -67,8 +66,9 @@ async def fetch_all_ics(grupa_ids: list[str], max_concurrent: int = 20) -> list[
             results.append(result)
     return results
 
-def download_ics_for_groups_async(grupa_ids: list[str]) -> list[dict]:
+
+def download_ics_for_groups_async(grupa_ids: list[str], max_concurrent: int = 100) -> list[dict]:
     """
-    Wywołuje asynchroniczny fetch dla wszystkich grup.
+    Wywołuje asynchroniczny fetch dla wszystkich grup, z większą współbieżnością.
     """
-    return asyncio.run(fetch_all_ics(grupa_ids))
+    return asyncio.run(fetch_all_ics(grupa_ids, max_concurrent=max_concurrent))
