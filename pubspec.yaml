@@ -33,7 +33,7 @@ flutter:
     - .env
 
   fonts:
-    - family: MyUZicons
+    - family: MyUzIcons
       fonts:
         - asset: fonts/MyUzIcons.ttf
     - family: Inter
