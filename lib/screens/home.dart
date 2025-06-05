@@ -240,9 +240,27 @@ class _HomeScreenState extends State<HomeScreen> {
               if (snapshot.hasError) {
                 return Text('Błąd: ${snapshot.error}');
               }
-              final zajecia = snapshot.data ?? [];
+              // FILTRUJEMY TYLKO DZISIEJSZE I TRWAJĄCE TERAZ ZAJĘCIA
+              final zajecia =
+                  (snapshot.data ?? []).where((zajecie) {
+                    final now = DateTime.now();
+                    final od = DateTime.tryParse(
+                      zajecie['od']?.toString() ?? '',
+                    );
+                    final do_ = DateTime.tryParse(
+                      zajecie['do_']?.toString() ?? '',
+                    );
+                    if (od == null || do_ == null) return false;
+                    final isToday =
+                        od.year == now.year &&
+                        od.month == now.month &&
+                        od.day == now.day;
+                    final isNow = now.isAfter(od) && now.isBefore(do_);
+                    return isToday && isNow;
+                  }).toList();
+
               if (zajecia.isEmpty) {
-                return const Text('Brak nadchodzących zajęć');
+                return const Text('Brak trwających zajęć dzisiaj');
               }
               return SingleChildScrollView(
                 padding: const EdgeInsets.only(right: 16),
