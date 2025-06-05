@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/fonts.dart';
+import '../theme/theme.dart';
 import '../components/cards/ZajeciaCard.dart';
 import '../components/cards/ZadaniaCard.dart';
 import '../components/cards/WydarzeniaCard.dart';
@@ -26,7 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F2F9),
+      backgroundColor: kBackground, // Figma: background
       body: SafeArea(
         child: Column(
           children: [
@@ -39,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- Górny pasek z datą i ikonami ---
   Widget _buildTopSection(BuildContext context) {
     return Container(
       width: double.infinity,
@@ -57,15 +59,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 width: 48,
                 height: 48,
                 decoration: ShapeDecoration(
-                  color: const Color(0xFFE8DEF8),
+                  color: kCardPurple,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(100),
                   ),
                 ),
                 child: IconButton(
-                  icon: const Icon(
-                    MyUZicons.map,
-                    color: Color(0xFF1D192B),
+                  icon: Icon(
+                    MyUzIcons.map,
+                    color: kMainText,
                     size: 24,
                   ),
                   onPressed: () {},
@@ -78,15 +80,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     width: 48,
                     height: 48,
                     decoration: ShapeDecoration(
-                      color: const Color(0xFFE8DEF8),
+                      color: kCardPurple,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(100),
                       ),
                     ),
                     child: IconButton(
-                      icon: const Icon(
-                        MyUZicons.mail,
-                        color: Color(0xFF1D192B),
+                      icon: Icon(
+                        MyUzIcons.mail,
+                        color: kMainText,
                         size: 24,
                       ),
                       onPressed: () {},
@@ -99,7 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       width: 8,
                       height: 8,
                       decoration: const ShapeDecoration(
-                        color: Color(0xFFB3261E),
+                        color: kError,
                         shape: OvalBorder(),
                       ),
                     ),
@@ -113,6 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- Powitanie użytkownika ---
   Widget _buildGreetingSection(BuildContext context) {
     return Container(
       width: double.infinity,
@@ -132,6 +135,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- Stopka aplikacji ---
   Widget _buildFooter(BuildContext context) {
     return Container(
       width: double.infinity,
@@ -185,11 +189,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // --- Główna sekcja kart na Home ---
   Widget _buildMainSection(BuildContext context) {
     return Container(
       width: double.infinity,
       decoration: const BoxDecoration(
-        color: Colors.white,
+        color: kWhite,
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(16),
           topRight: Radius.circular(16),
@@ -210,6 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- Sekcja: Najbliższe zajęcia ---
   Widget _buildClassesSection(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(top: 24, left: 16, right: 0, bottom: 12),
@@ -219,8 +225,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               const Icon(
-                MyUZicons.calendar_check,
-                color: Color(0xFF1D192B),
+                MyUzIcons.calendar_check,
+                color: kMainText,
                 size: 20,
               ),
               const SizedBox(width: 8),
@@ -240,27 +246,9 @@ class _HomeScreenState extends State<HomeScreen> {
               if (snapshot.hasError) {
                 return Text('Błąd: ${snapshot.error}');
               }
-              // FILTRUJEMY TYLKO DZISIEJSZE I TRWAJĄCE TERAZ ZAJĘCIA
-              final zajecia =
-                  (snapshot.data ?? []).where((zajecie) {
-                    final now = DateTime.now();
-                    final od = DateTime.tryParse(
-                      zajecie['od']?.toString() ?? '',
-                    );
-                    final do_ = DateTime.tryParse(
-                      zajecie['do_']?.toString() ?? '',
-                    );
-                    if (od == null || do_ == null) return false;
-                    final isToday =
-                        od.year == now.year &&
-                        od.month == now.month &&
-                        od.day == now.day;
-                    final isNow = now.isAfter(od) && now.isBefore(do_);
-                    return isToday && isNow;
-                  }).toList();
-
+              final zajecia = snapshot.data ?? [];
               if (zajecia.isEmpty) {
-                return const Text('Brak trwających zajęć dzisiaj');
+                return const Text('Brak nadchodzących zajęć');
               }
               return SingleChildScrollView(
                 padding: const EdgeInsets.only(right: 16),
@@ -273,10 +261,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         time: _formatTime(zajecia[i]['od'], zajecia[i]['do_']),
                         room: zajecia[i]['miejsce']?.toString() ?? '',
                         avatarText:
-                            (zajecia[i]['rz']?.toString() ?? '').isNotEmpty
-                                ? zajecia[i]['rz'][0].toUpperCase()
-                                : '?',
-                        backgroundColor: const Color(0xFFE8DEF8),
+                        (zajecia[i]['rz']?.toString() ?? '').isNotEmpty
+                            ? zajecia[i]['rz'][0].toUpperCase()
+                            : '?',
+                        backgroundColor: kCardPurple,
                       ),
                       if (i != zajecia.length - 1) const SizedBox(width: 8),
                     ],
@@ -290,6 +278,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- Sekcja: Zadania ---
   Widget _buildTasksSection(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(top: 12, left: 16, right: 0, bottom: 12),
@@ -299,8 +288,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               const Icon(
-                MyUZicons.book_open,
-                color: Color(0xFF1D192B),
+                MyUzIcons.book_open,
+                color: kMainText,
                 size: 20,
               ),
               const SizedBox(width: 8),
@@ -317,14 +306,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   title: 'Zadanie lorem ipsum',
                   description: 'Lorem ipsum dolor amet tempor dolor ipsum',
                   avatarText: 'Z',
-                  backgroundColor: const Color(0xFFFFD8E4),
+                  backgroundColor: kCardPink,
                 ),
                 const SizedBox(width: 8),
                 ZadaniaCard(
                   title: 'Zadanie lorem ipsum',
                   description: 'Lorem ipsum dolor amet tempor dolor ipsum',
                   avatarText: 'A',
-                  backgroundColor: const Color(0xFFE8DEF8),
+                  backgroundColor: kCardPurple,
                 ),
               ],
             ),
@@ -334,6 +323,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- Sekcja: Wydarzenia ---
   Widget _buildEventsSection(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(top: 12, left: 16, right: 0, bottom: 12),
@@ -343,8 +333,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               const Icon(
-                MyUZicons.marker_pin,
-                color: Color(0xFF1D192B),
+                MyUzIcons.marker_pin,
+                color: kMainText,
                 size: 20,
               ),
               const SizedBox(width: 8),
@@ -360,13 +350,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 WydarzeniaCard(
                   title: 'Lorem ipsum',
                   description: 'Lorem ipsum dolor amet tempor dolor ipsum',
-                  backgroundColor: const Color(0xFFDAF4D6),
+                  backgroundColor: kCardGreen,
                 ),
                 const SizedBox(width: 8),
                 WydarzeniaCard(
                   title: 'Zadanie lorem ipsum',
                   description: 'Lorem ipsum dolor amet tempor dolor ipsum',
-                  backgroundColor: const Color(0xFFDAF4D6),
+                  backgroundColor: kCardGreen,
                 ),
               ],
             ),

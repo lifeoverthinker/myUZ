@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../theme/fonts.dart';
+import '../../theme/theme.dart';
 
+// --- Index: zakładka Oceny (Figma: pastel cards, typography) ---
 class SubjectGradesTab extends StatelessWidget {
   final List<Map<String, dynamic>> subjects;
   final void Function(int subjectIdx, int sectionIdx)? onGoToSection;
@@ -14,13 +16,8 @@ class SubjectGradesTab extends StatelessWidget {
   }) : super(key: key);
 
   Color _getCardColor(int idx) {
-    // Odcienie jak na home (przykładowe pastelowe, z dobrym kontrastem)
-    final colors = [
-      const Color(0xFFE8DEF8), // pastelowy fiolet
-      const Color(0xFFFFE7EC), // pastelowy róż
-      const Color(0xFFE6F3EC), // pastelowa zieleń
-      const Color(0xFFFFF8E1), // pastelowy żółty
-    ];
+    // Figma: pastel cards Index
+    final colors = [kCardPurple, kCardPink, kCardBlue, kCardYellow];
     return colors[idx % colors.length];
   }
 
@@ -41,7 +38,7 @@ class SubjectGradesTab extends StatelessWidget {
               child: Text(
                 subject['name'],
                 style: AppTextStyles.indexSubjectTitle(context).copyWith(
-                  color: const Color(0xFF1D192B),
+                  color: kMainText,
                   fontWeight: FontWeight.w700,
                   fontSize: 17,
                 ),
@@ -59,17 +56,15 @@ class SubjectGradesTab extends StatelessWidget {
             ...List.generate(sections.length, (sectionIdx) {
               final section = sections[sectionIdx];
               final grades = section['grades'] as List;
-              final avg =
-                  grades.isEmpty
-                      ? null
-                      : grades
-                              .map((g) => g['value'] as num)
-                              .reduce((a, b) => a + b) /
-                          grades.length;
-              final gradesString =
-                  grades.isNotEmpty
-                      ? grades.map((g) => g['value'].toString()).join(', ')
-                      : "";
+              final avg = grades.isEmpty
+                  ? null
+                  : grades
+                  .map((g) => g['value'] as num)
+                  .reduce((a, b) => a + b) /
+                  grades.length;
+              final gradesString = grades.isNotEmpty
+                  ? grades.map((g) => g['value'].toString()).join(', ')
+                  : "";
 
               return Container(
                 margin: const EdgeInsets.only(top: 8),
@@ -99,41 +94,39 @@ class SubjectGradesTab extends StatelessWidget {
                           children: [
                             SizedBox(
                               width: 64,
-                              child:
-                                  avg != null
-                                      ? Text(
-                                        avg.toStringAsFixed(2),
-                                        style: AppTextStyles.indexAverageValue(
-                                          context,
-                                        ).copyWith(
-                                          color: const Color(0xFF1D192B),
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      )
-                                      : Text(
-                                        "Brak ocen",
-                                        style: AppTextStyles.cardDescription(
-                                          context,
-                                        ).copyWith(color: Colors.black54),
-                                      ),
+                              child: avg != null
+                                  ? Text(
+                                avg.toStringAsFixed(2),
+                                style: AppTextStyles.indexAverageValue(
+                                  context,
+                                ).copyWith(
+                                  color: kMainText,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              )
+                                  : Text(
+                                "Brak ocen",
+                                style: AppTextStyles.cardDescription(
+                                  context,
+                                ).copyWith(color: Colors.black54),
+                              ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
-                              child:
-                                  grades.isNotEmpty
-                                      ? Text(
-                                        gradesString,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: AppTextStyles.indexGrade(
-                                          context,
-                                        ).copyWith(
-                                          color: const Color(0xFF1D192B),
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                        textAlign: TextAlign.right,
-                                      )
-                                      : Container(),
+                              child: grades.isNotEmpty
+                                  ? Text(
+                                gradesString,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTextStyles.indexGrade(
+                                  context,
+                                ).copyWith(
+                                  color: kMainText,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                textAlign: TextAlign.right,
+                              )
+                                  : Container(),
                             ),
                             const SizedBox(width: 6),
                             Icon(
@@ -167,9 +160,8 @@ class SubjectGradesTab extends StatelessWidget {
               child: TextButton.icon(
                 style: TextButton.styleFrom(
                   foregroundColor: Theme.of(context).colorScheme.primary,
-                  textStyle: AppTextStyles.cardDescription(
-                    context,
-                  ).copyWith(fontWeight: FontWeight.w500),
+                  textStyle: AppTextStyles.cardDescription(context)
+                      .copyWith(fontWeight: FontWeight.w500),
                   padding: const EdgeInsets.symmetric(horizontal: 0),
                 ),
                 icon: const Icon(Icons.add, size: 18),

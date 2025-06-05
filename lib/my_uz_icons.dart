@@ -9,16 +9,16 @@
 ///   fonts:
 ///    - family:  MyUZicons
 ///      fonts:
-///       - asset: fonts/MyUZicons.ttf
+///       - asset: fonts/MyUzIcons.ttf
 ///
 /// 
 ///
 import 'package:flutter/widgets.dart';
 
-class MyUZicons {
-  MyUZicons._();
+class MyUzIcons {
+  MyUzIcons._();
 
-  static const _kFontFam = 'MyUZicons';
+  static const _kFontFam = 'MyUzIcons';
   static const String? _kFontPkg = null;
 
   static const IconData chevron_left_svgrepo_com = IconData(0xe800, fontFamily: _kFontFam, fontPackage: _kFontPkg);

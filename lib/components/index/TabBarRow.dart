@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../theme/theme.dart';
 
+// --- TabBarRow (Figma: TabBar, różne sekcje Index) ---
 class TabBarRow extends StatelessWidget {
   final int selectedIndex;
   final List<String> labels;
@@ -25,17 +27,15 @@ class TabBarRow extends StatelessWidget {
               child: Container(
                 height: 32,
                 decoration: ShapeDecoration(
-                  color:
-                      isSelected ? const Color(0xFFE8DEF8) : Colors.transparent,
+                  color: isSelected ? kCardPurple : Colors.transparent,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
-                    side:
-                        isSelected
-                            ? BorderSide.none
-                            : const BorderSide(
-                              width: 1,
-                              color: Color(0xFF79747E),
-                            ),
+                    side: isSelected
+                        ? BorderSide.none
+                        : const BorderSide(
+                      width: 1,
+                      color: kCardBorder,
+                    ),
                   ),
                 ),
                 child: Center(
@@ -43,10 +43,7 @@ class TabBarRow extends StatelessWidget {
                     labels[idx],
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color:
-                          isSelected
-                              ? const Color(0xFF1D192B)
-                              : const Color(0xFF49454F),
+                      color: isSelected ? kMainText : kGreyText,
                       fontSize: 14,
                       fontFamily: 'Inter',
                       fontWeight: FontWeight.w500,

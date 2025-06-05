@@ -35,7 +35,7 @@ flutter:
   fonts:
     - family: MyUZicons
       fonts:
-        - asset: fonts/MyUZicons.ttf
+        - asset: fonts/MyUzIcons.ttf
     - family: Inter
       fonts:
         - asset: assets/fonts/Inter_18pt-Regular.ttf

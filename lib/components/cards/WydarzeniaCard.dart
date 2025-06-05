@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/fonts.dart';
+import '../../theme/theme.dart';
 
 class WydarzeniaCard extends StatelessWidget {
   final String title;

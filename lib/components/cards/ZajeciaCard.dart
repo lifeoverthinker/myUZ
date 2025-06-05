@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/fonts.dart';
+import '../../theme/theme.dart';
 import '../../my_uz_icons.dart';
 
 class ZajeciaCard extends StatelessWidget {
@@ -24,7 +25,7 @@ class ZajeciaCard extends StatelessWidget {
       width: 264,
       padding: const EdgeInsets.all(12),
       decoration: ShapeDecoration(
-        color: backgroundColor,
+        color: backgroundColor, // pastelowy fiolet z theme
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       child: Row(
@@ -47,9 +48,9 @@ class ZajeciaCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Icon(
-                      MyUZicons.clock,
+                      MyUzIcons.clock,
                       size: 16,
-                      color: const Color(0xFF494949),
+                      color: kGreyText,
                     ),
                     const SizedBox(width: 4),
                     Flexible(
@@ -78,7 +79,7 @@ class ZajeciaCard extends StatelessWidget {
             width: 32,
             height: 32,
             decoration: const ShapeDecoration(
-              color: Color(0xFF6750A4),
+              color: kAvatarZajecia,
               shape: OvalBorder(),
             ),
             child: Center(

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../theme/fonts.dart';
+import '../../theme/theme.dart';
 import '../cards/ZajeciaCalendarCard.dart';
 
+// --- CalendarDayView (Figma: godziny pionowe, pastel card, linie siatki) ---
 class CalendarDayView extends StatelessWidget {
   static const int startHour = 1;
   static const int endHour = 23;
@@ -10,7 +12,6 @@ class CalendarDayView extends StatelessWidget {
   static const double verticalLineOffset = 8;
   static const double verticalLineWidth = 1;
   static const double horizontalLineHeight = 1;
-  static const Color lineColor = Color(0xFFEDE6F3);
 
   final List<Map<String, dynamic>> zajecia;
 
@@ -21,7 +22,7 @@ class CalendarDayView extends StatelessWidget {
     final hourCount = endHour - startHour + 1;
     final totalHeight = hourCount * hourRowHeight;
 
-    // Sortowanie zajęć po czasie rozpoczęcia
+    // Sort zajęcia po czasie rozpoczęcia
     final zajeciaSorted = List<Map<String, dynamic>>.from(zajecia)
       ..sort((a, b) => DateTime.parse(a['od']).compareTo(DateTime.parse(b['od'])));
 
@@ -32,7 +33,7 @@ class CalendarDayView extends StatelessWidget {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // Warstwa godzinowa (tło)
+            // --- Warstwa godzinowa (tło, poziome linie, godziny) ---
             ListView.builder(
               physics: const NeverScrollableScrollPhysics(),
               itemCount: hourCount,
@@ -49,7 +50,7 @@ class CalendarDayView extends StatelessWidget {
                         top: hourRowHeight / 2,
                         child: Container(
                           height: horizontalLineHeight,
-                          color: lineColor,
+                          color: kNavBorder,
                         ),
                       ),
                       // Godzina po lewej
@@ -63,7 +64,7 @@ class CalendarDayView extends StatelessWidget {
                           child: Text(
                             '${hour.toString().padLeft(2, '0')}:00',
                             style: AppTextStyles.calendarHour(context).copyWith(
-                              color: const Color(0xFF616161),
+                              color: kGreyText,
                               fontWeight: FontWeight.w400,
                               fontSize: 15,
                             ),
@@ -80,7 +81,7 @@ class CalendarDayView extends StatelessWidget {
               left: hourLabelWidth + 16,
               top: 0,
               bottom: 0,
-              child: Container(width: verticalLineWidth, color: lineColor),
+              child: Container(width: verticalLineWidth, color: kNavBorder),
             ),
             // Karty zajęć precyzyjnie przyczepione do godzin/minut
             ...zajeciaSorted.map((zajecie) {
@@ -90,6 +91,10 @@ class CalendarDayView extends StatelessWidget {
                   (start.minute / 60.0) * hourRowHeight;
               final durationMinutes = end.difference(start).inMinutes;
               final cardHeight = (durationMinutes / 60.0) * hourRowHeight;
+
+              // Fallback na kolory jeśli nie przekazane w zajecie
+              final backgroundColor = zajecie['backgroundColor'] ?? kCardPurple;
+              final dotColor = zajecie['dotColor'] ?? kAvatarZajecia;
 
               return Positioned(
                 left: hourLabelWidth + 24,
@@ -101,8 +106,8 @@ class CalendarDayView extends StatelessWidget {
                   time: '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')} - '
                       '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}',
                   room: zajecie['miejsce'] ?? '',
-                  backgroundColor: const Color(0xFFE8DEF8),
-                  dotColor: const Color(0xFF6750A4),
+                  backgroundColor: backgroundColor,
+                  dotColor: dotColor,
                 ),
               );
             }),

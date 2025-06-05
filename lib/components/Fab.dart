@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import '../theme/theme.dart';
+import '../theme/fonts.dart';
 
+// --- Floating Action Button + akcje (Figma: Fab, actions) ---
 class Fab extends StatefulWidget {
   final void Function()? onAddZajecia;
   final void Function()? onAddOcena;
@@ -49,6 +52,7 @@ class _FabState extends State<Fab> with SingleTickerProviderStateMixin {
     });
   }
 
+  // --- Fab Action Button (Figma: fab action) ---
   Widget _buildAction({
     required IconData icon,
     required String label,
@@ -56,8 +60,8 @@ class _FabState extends State<Fab> with SingleTickerProviderStateMixin {
     required void Function()? onTap,
     required int index,
   }) {
-    final textStyle = Theme.of(context).textTheme.bodyLarge?.copyWith(
-      color: Colors.black87,
+    final textStyle = AppTextStyles.cardTitle(context).copyWith(
+      color: kMainText,
       fontWeight: FontWeight.w500,
       fontSize: 15,
     );
@@ -92,7 +96,7 @@ class _FabState extends State<Fab> with SingleTickerProviderStateMixin {
             FloatingActionButton(
               heroTag: label,
               mini: true,
-              backgroundColor: Colors.white,
+              backgroundColor: kWhite,
               elevation: 2,
               onPressed: () {
                 _close();
@@ -108,9 +112,10 @@ class _FabState extends State<Fab> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Colors.deepPurple;
-    final error = Colors.red;
-    final onPrimary = Colors.white;
+    // --- Kolory Figma: Fab primary, error ---
+    final primary = kNavSelected;
+    final error = kError;
+    final onPrimary = kWhite;
 
     return Stack(
       alignment: Alignment.bottomRight,

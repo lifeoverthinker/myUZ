@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../theme/fonts.dart';
+import '../../theme/theme.dart';
 import '../../my_uz_icons.dart';
 
+// --- Card: ZajeciaCalendarCard (Figma: Card, pastel background, dot accent) ---
 class ZajeciaCalendarCard extends StatelessWidget {
   final String title;
   final String time;
@@ -24,13 +26,13 @@ class ZajeciaCalendarCard extends StatelessWidget {
       width: 264,
       padding: const EdgeInsets.all(12),
       decoration: ShapeDecoration(
-        color: backgroundColor,
+        color: backgroundColor, // Figma: pastel card
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Sekcja tekstowa – elastyczna!
+          // --- Teksty (tytuł, godzina, sala) ---
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -47,9 +49,9 @@ class ZajeciaCalendarCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Icon(
-                      MyUZicons.clock,
+                      MyUzIcons.clock,
                       size: 16,
-                      color: const Color(0xFF494949),
+                      color: kGreyText, // Figma: godzina
                     ),
                     const SizedBox(width: 4),
                     Flexible(
@@ -75,12 +77,15 @@ class ZajeciaCalendarCard extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 16),
-          // Kropka po prawej (8x8)
+          // --- Kropka po prawej (dot accent, Figma: dot color = dotColor) ---
           Container(
             width: 8,
             height: 8,
             margin: const EdgeInsets.only(top: 12),
-            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: dotColor,
+              shape: BoxShape.circle,
+            ),
           ),
         ],
       ),

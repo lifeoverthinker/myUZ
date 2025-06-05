@@ -7,6 +7,7 @@ import 'screens/calendar.dart';
 import 'screens/index.dart';
 import 'screens/profile.dart';
 import 'theme/fonts.dart';
+import 'theme/theme.dart'; // <--- dodany import
 import 'my_uz_icons.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:device_preview/device_preview.dart';
@@ -38,11 +39,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'MyUZ',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        useMaterial3: true,
-        fontFamily: 'Inter',
-      ),
+      theme: buildAppTheme(), // <--- użycie nowego Theme
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -109,14 +106,15 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const selectedColor = Color(0xFF381E72);
-    const unselectedColor = Color(0xFF787579);
-    const borderColor = Color(0xFFEDE6F3);
+    // --- Kolory nawigacji z theme ---
+    final selectedColor = kNavSelected;
+    final unselectedColor = kNavUnselected;
+    final borderColor = kNavBorder;
     final navItems = [
-      {'icon': MyUZicons.home, 'label': 'Główna'},
-      {'icon': MyUZicons.calendar_check, 'label': 'Kalendarz'},
-      {'icon': MyUZicons.graduation_hat, 'label': 'Indeks'},
-      {'icon': MyUZicons.user, 'label': 'Konto'},
+      {'icon': MyUzIcons.home, 'label': 'Główna'},
+      {'icon': MyUzIcons.calendar_check, 'label': 'Kalendarz'},
+      {'icon': MyUzIcons.graduation_hat, 'label': 'Indeks'},
+      {'icon': MyUzIcons.user, 'label': 'Konto'},
     ];
     return Scaffold(
       body: NotificationListener<ScrollNotification>(
@@ -126,8 +124,8 @@ class _MainScreenState extends State<MainScreen> {
         child: _wrapWithScrollController(_screens[_selectedIndex]),
       ),
       bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
+        decoration: BoxDecoration(
+          color: kWhite,
           border: Border(top: BorderSide(color: borderColor, width: 1)),
         ),
         padding: const EdgeInsets.only(top: 8, bottom: 16),

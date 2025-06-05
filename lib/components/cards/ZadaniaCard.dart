@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/fonts.dart';
+import '../../theme/theme.dart';
 
 class ZadaniaCard extends StatelessWidget {
   final String title;
@@ -21,7 +22,7 @@ class ZadaniaCard extends StatelessWidget {
       width: 264,
       padding: const EdgeInsets.all(12),
       decoration: ShapeDecoration(
-        color: backgroundColor,
+        color: backgroundColor, // pastel z theme
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
         ),
@@ -64,7 +65,7 @@ class ZadaniaCard extends StatelessWidget {
             width: 32,
             height: 32,
             decoration: const ShapeDecoration(
-              color: Color(0xFF7D5260), // Figma: avatar zadania
+              color: kAvatarZadanie, // Figma: avatar zadania
               shape: OvalBorder(),
             ),
             child: Center(

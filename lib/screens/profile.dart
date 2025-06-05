@@ -1,15 +1,7 @@
 import 'package:flutter/material.dart';
+import '../theme/theme.dart';
 
-// Kolory Material Theme Builder 2024
-const List<Color> materialPalette = [
-  Color(0xFF6750A4), // Blue/Purple
-  Color(0xFF006E2C), // Green
-  Color(0xFFFFD600), // Yellow/Gold
-  Color(0xFFE46962), // Pink
-  Color(0xFFFF8A00), // Orange
-  Color(0xFFB3261E), // Red
-];
-
+// --- ProfileScreen: paleta kolorów z Theme ---
 class ProfileScreen extends StatelessWidget {
   final String name;
   final String initials;
@@ -32,9 +24,9 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mainColor = materialPalette[selectedTheme];
-    final surface = isDarkMode ? Colors.grey[900]! : Colors.white;
-    final textColor = isDarkMode ? Colors.white : Colors.black87;
+    final mainColor = kMaterialPalette[selectedTheme];
+    final surface = isDarkMode ? Colors.grey[900]! : kWhite;
+    final textColor = isDarkMode ? kWhite : Colors.black87;
     final bgAccent = mainColor.withOpacity(0.09);
 
     return Scaffold(
@@ -42,7 +34,7 @@ class ProfileScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            // Górny header (jak classroom)
+            // --- Header z avatar i imieniem ---
             Container(
               width: double.infinity,
               padding: const EdgeInsets.only(top: 36, bottom: 24),
@@ -60,7 +52,7 @@ class ProfileScreen extends StatelessWidget {
                     child: Text(
                       initials,
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: kWhite,
                         fontWeight: FontWeight.bold,
                         fontSize: 32,
                         letterSpacing: 1.2,
@@ -100,7 +92,7 @@ class ProfileScreen extends StatelessWidget {
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
                 children: [
-                  // Motyw aplikacji (karta)
+                  // --- Karta wyboru motywu aplikacji ---
                   Card(
                     elevation: 0,
                     color: isDarkMode ? mainColor.withOpacity(0.13) : mainColor.withOpacity(0.07),
@@ -121,7 +113,7 @@ class ProfileScreen extends StatelessWidget {
                           ),
                           const Spacer(),
                           _ThemeRow(
-                            palette: materialPalette,
+                            palette: kMaterialPalette,
                             selected: selectedTheme,
                             onChanged: onThemeSelected,
                           ),
@@ -130,7 +122,7 @@ class ProfileScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  // Dark mode (karta)
+                  // --- Karta Tryb ciemny ---
                   Card(
                     elevation: 0,
                     color: isDarkMode ? mainColor.withOpacity(0.13) : mainColor.withOpacity(0.07),
@@ -187,7 +179,7 @@ class _ThemeRow extends StatelessWidget {
               radius: selected == idx ? 15 : 13,
               backgroundColor: color,
               child: selected == idx
-                  ? const Icon(Icons.check, color: Colors.white, size: 17)
+                  ? const Icon(Icons.check, color: kWhite, size: 17)
                   : null,
             ),
           ),

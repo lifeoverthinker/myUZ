@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../theme/fonts.dart';
+import '../../theme/theme.dart';
 
+// --- AbsencesTab (Figma: licznik, card pastel, icon color) ---
 class AbsencesTab extends StatelessWidget {
   final List<Map<String, dynamic>> absences;
   final void Function(int subjectIdx)? onAddAbsence;
@@ -32,7 +34,7 @@ class AbsencesTab extends StatelessWidget {
         final List<Map<String, dynamic>> subjectAbsences =
             subject['absences'] as List<Map<String, dynamic>>? ?? [];
         final int used = subjectAbsences.length;
-        final int? limit = subject['limit']; // można przekazać w danych, np. 3
+        final int? limit = subject['limit'];
         final int remaining = limit != null ? (limit - used) : 0;
 
         return Column(
@@ -45,28 +47,28 @@ class AbsencesTab extends StatelessWidget {
                   child: Text(
                     subject['subject'],
                     style: AppTextStyles.indexSubjectTitle(context).copyWith(
-                      color: const Color(0xFF1D192B),
+                      color: kMainText,
                       fontWeight: FontWeight.w700,
                       fontSize: 17,
                     ),
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE8DEF8),
+                    color: kCardPurple,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.event_busy, size: 17, color: Color(0xFF6750A4)),
+                      const Icon(Icons.event_busy,
+                          size: 17, color: kIndexPrimary),
                       const SizedBox(width: 4),
                       Text(
-                        limit != null
-                            ? '$used/$limit'
-                            : used.toString(),
+                        limit != null ? '$used/$limit' : used.toString(),
                         style: AppTextStyles.indexGrade(context).copyWith(
-                          color: const Color(0xFF6750A4),
+                          color: kIndexPrimary,
                           fontWeight: FontWeight.w600,
                           fontSize: 15,
                         ),
@@ -83,9 +85,8 @@ class AbsencesTab extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
                   'Brak nieobecności',
-                  style: AppTextStyles.cardDescription(context).copyWith(
-                    color: Colors.black54,
-                  ),
+                  style: AppTextStyles.cardDescription(context)
+                      .copyWith(color: Colors.black54),
                 ),
               )
             else
@@ -99,16 +100,18 @@ class AbsencesTab extends StatelessWidget {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
                     child: Material(
-                      color: const Color(0xFFF7F2F9),
+                      color: kBackground,
                       borderRadius: BorderRadius.circular(10),
                       child: ListTile(
                         dense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                        leading: const Icon(Icons.calendar_today, size: 20, color: Color(0xFF79747E)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 2),
+                        leading: const Icon(Icons.calendar_today,
+                            size: 20, color: kCardBorder),
                         title: Text(
                           dateStr,
                           style: AppTextStyles.indexGrade(context).copyWith(
-                            color: const Color(0xFF1D192B),
+                            color: kMainText,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -116,7 +119,8 @@ class AbsencesTab extends StatelessWidget {
                             ? () => onEditAbsence!(subjectIdx, absenceIdx)
                             : null,
                         trailing: onEditAbsence != null
-                            ? Icon(Icons.edit, color: Colors.grey.shade500, size: 18)
+                            ? Icon(Icons.edit,
+                            color: Colors.grey.shade500, size: 18)
                             : null,
                       ),
                     ),
@@ -129,14 +133,15 @@ class AbsencesTab extends StatelessWidget {
               child: TextButton.icon(
                 style: TextButton.styleFrom(
                   foregroundColor: Theme.of(context).colorScheme.primary,
-                  textStyle: AppTextStyles.cardDescription(context).copyWith(fontWeight: FontWeight.w500),
-                  padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+                  textStyle: AppTextStyles.cardDescription(context)
+                      .copyWith(fontWeight: FontWeight.w500),
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
                 ),
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('Dodaj nieobecność'),
-                onPressed: onAddAbsence != null
-                    ? () => onAddAbsence!(subjectIdx)
-                    : null,
+                onPressed:
+                onAddAbsence != null ? () => onAddAbsence!(subjectIdx) : null,
               ),
             ),
           ],
