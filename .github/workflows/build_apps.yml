@@ -4,39 +4,50 @@ on:
   workflow_dispatch:
 
 jobs:
-  build_ios:
-    name: Build iOS App
-    runs-on: macos-latest
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+        platform: [ios, android]
+      fail-fast: false
+      exclude:
+        - os: ubuntu-latest
+          platform: ios
+        - os: macos-latest
+          platform: android
+
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.7.2'
-      - name: Install dependencies
-        run: flutter pub get
-      - name: Build IPA
+          cache: true
+
+      - name: Clean & install dependencies
+        run: |
+          flutter clean
+          flutter pub get
+
+      - name: Build iOS
+        if: matrix.platform == 'ios'
         run: flutter build ipa --export-options-plist=ios/ExportOptions.plist
+
       - name: Upload IPA
+        if: matrix.platform == 'ios'
         uses: actions/upload-artifact@v4
         with:
           name: iOS-IPA
           path: build/ios/ipa/*.ipa
 
-  build_android:
-    name: Build Android App
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.7.2'
-      - name: Install dependencies
-        run: flutter pub get
-      - name: Build APK
+      - name: Build Android
+        if: matrix.platform == 'android'
         run: flutter build apk --release
+
       - name: Upload APK
+        if: matrix.platform == 'android'
         uses: actions/upload-artifact@v4
         with:
           name: Android-APK
