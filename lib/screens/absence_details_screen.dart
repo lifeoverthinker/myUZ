@@ -51,7 +51,7 @@ class _AbsenceDetailsScreenState extends State<AbsenceDetailsScreen> {
         surfaceTintColor: Colors.white,
         leading: IconButton(
           icon: Icon(
-            MyUzIcons.chevron_left_svgrepo_com,
+            MyUzIcons.chevron_left,
             color: kMainText,
             size: 24,
           ),
@@ -81,7 +81,7 @@ class _AbsenceDetailsScreenState extends State<AbsenceDetailsScreen> {
         ),
         actions: [
           IconButton(
-            icon: Icon(MyUzIcons.settings_02_svgrepo_com,
+            icon: Icon(MyUzIcons.settings,
                 color: kGreyText, size: 22),
             tooltip: 'Zmień limit',
             onPressed: _showEditLimitDialog,
@@ -158,17 +158,17 @@ class _AbsenceDetailsScreenState extends State<AbsenceDetailsScreen> {
             children: [
               // Kółko z ikoną kalendarza na czerwono
               Container(
-                width: 32,
-                height: 32,
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
                   color: kCardRed.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(24),
                 ),
                 child: Center(
                   child: Icon(
-                    MyUzIcons.calendar_minus_02_svgrepo_com,
+                    MyUzIcons.calendar_minus,
                     color: kCardRed,
-                    size: 18,
+                    size: 24,
                   ),
                 ),
               ),

@@ -144,7 +144,7 @@ class SubjectCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            MyUzIcons.calendar_minus_02_svgrepo_com,
+            MyUzIcons.calendar_minus,
             size: 14,
             color: isWarning ? kCardRed : kCardGreen.withOpacity(0.8),
           ),

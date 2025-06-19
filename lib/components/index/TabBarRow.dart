@@ -20,7 +20,7 @@ class TabBarRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final icons = [
       MyUzIcons.graduation_hat,
-      MyUzIcons.calendar_minus_02_svgrepo_com,
+      MyUzIcons.calendar_minus,
     ];
 
     return Row(

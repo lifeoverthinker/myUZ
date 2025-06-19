@@ -59,7 +59,7 @@ class _GradeDetailsScreenState extends State<GradeDetailsScreen> {
         surfaceTintColor: Colors.white,
         leading: IconButton(
           icon: Icon(
-            MyUzIcons.chevron_left_svgrepo_com,
+            MyUzIcons.chevron_left,
             color: kMainText,
             size: 24,
           ),
@@ -212,24 +212,24 @@ class _GradeDetailsScreenState extends State<GradeDetailsScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: kCardPurple,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Center(
-                child: Text(
-                  value.toString(),
-                  style: AppTextStyles.indexGrade(context).copyWith(
-                    color: kIndexPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: kCardPurple,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Center(
+                  child: Text(
+                    value.toString(),
+                    style: AppTextStyles.indexGrade(context).copyWith(
+                      color: kIndexPrimary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600, // cieńsza cyfra
+                    ),
                   ),
                 ),
               ),
-            ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
@@ -292,7 +292,7 @@ class _GradeDetailsScreenState extends State<GradeDetailsScreen> {
                   style: AppTextStyles.indexGrade(context).copyWith(
                     color: const Color(0xFF388E3C),
                     fontSize: 20,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w600, // cieńszy znak
                   ),
                 ),
               ),
@@ -397,7 +397,7 @@ class _GradeDetailsScreenState extends State<GradeDetailsScreen> {
                 (context, setStateModal) => AlertDialog(
                   backgroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                   contentPadding: const EdgeInsets.all(24),
                   title: Text(

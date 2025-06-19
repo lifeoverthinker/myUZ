@@ -23,7 +23,7 @@ const Color kCardYellow = Color(0xFFFFF8E1); // Card (yellow) - Index pastel
 const Color kCardBlue = Color(0xFFE6F3EC); // Card (blue/green) - Index pastel
 const Color kCardRed = Color(0xFFE46962); // (Figma: materialPalette[red])
 const Color kCardGold = Color(0xFFFFD600); // (Figma: materialPalette[yellow/gold])
-const Color kCalendarLine = Color(0xFFE0E0E0); // pastelowy szary, dopasuj do projektu
+const Color kCalendarLine = Color(0xFFEDE6F3); // pastelowy szary, dopasuj do projektu
 
 // --- Kolory ikon i avatarów ---
 const Color kAvatarZajecia = Color(0xFF6750A4); // Avatar ZajęciaCard (Figma: avatar zajecia)

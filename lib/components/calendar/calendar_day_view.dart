@@ -107,9 +107,7 @@ class _CalendarDayViewState extends State<CalendarDayView> {
                         top: CalendarDayView.hourRowHeight / 2,
                         child: Container(
                           height: CalendarDayView.horizontalLineHeight,
-                          color: const Color(
-                            0xFFEDE6F3,
-                          ), // Figma: calendar line (linia godziny)
+                          color: kCalendarLine,
                         ),
                       ),
 
