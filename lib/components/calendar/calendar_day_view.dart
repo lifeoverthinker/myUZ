@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import '../../theme/fonts.dart';
 import '../../theme/theme.dart';
 import '../cards/ZajeciaCalendarCard.dart';
+import '../cards/zajecia_details_modal.dart';
+import '../profile/user_profile.dart';
 
-// --- CalendarDayView (Figma: godziny pionowe, pastel card, linie siatki) ---
-class CalendarDayView extends StatelessWidget {
+class CalendarDayView extends StatefulWidget {
   static const int startHour = 1;
   static const int endHour = 23;
   static const double hourRowHeight = 70;
@@ -14,51 +15,109 @@ class CalendarDayView extends StatelessWidget {
   static const double horizontalLineHeight = 1;
 
   final List<Map<String, dynamic>> zajecia;
+  final ScrollController scrollController;
 
-  const CalendarDayView({super.key, required this.zajecia});
+  const CalendarDayView({
+    super.key,
+    required this.zajecia,
+    required this.scrollController,
+  });
+
+  @override
+  State<CalendarDayView> createState() => _CalendarDayViewState();
+}
+
+class _CalendarDayViewState extends State<CalendarDayView> {
+  bool _hasScrolledToFirstClass = false;
+
+  @override
+  void didUpdateWidget(covariant CalendarDayView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _hasScrolledToFirstClass = false;
+    _scrollToFirstClass();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scrollToFirstClass();
+  }
+
+  void _scrollToFirstClass() {
+    if (_hasScrolledToFirstClass || widget.zajecia.isEmpty) return;
+    final zajeciaSorted = List<Map<String, dynamic>>.from(widget.zajecia)..sort(
+      (a, b) => DateTime.parse(a['od']).compareTo(DateTime.parse(b['od'])),
+    );
+    if (zajeciaSorted.isNotEmpty) {
+      final now = DateTime.now();
+      final firstFutureClass = zajeciaSorted.firstWhere(
+        (z) => DateTime.parse(z['od']).isAfter(now),
+        orElse: () => zajeciaSorted.first,
+      );
+      final start = DateTime.parse(firstFutureClass['od']);
+      final offset =
+          ((start.hour - CalendarDayView.startHour) *
+                  CalendarDayView.hourRowHeight +
+              (start.minute / 60.0) * CalendarDayView.hourRowHeight) -
+          16;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (widget.scrollController.hasClients && !_hasScrolledToFirstClass) {
+          widget.scrollController.animateTo(
+            offset.clamp(0.0, widget.scrollController.position.maxScrollExtent),
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeInOutCubic,
+          );
+          _hasScrolledToFirstClass = true;
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final hourCount = endHour - startHour + 1;
-    final totalHeight = hourCount * hourRowHeight;
-
-    // Sort zajęcia po czasie rozpoczęcia
-    final zajeciaSorted = List<Map<String, dynamic>>.from(zajecia)
-      ..sort((a, b) => DateTime.parse(a['od']).compareTo(DateTime.parse(b['od'])));
+    final hourCount = CalendarDayView.endHour - CalendarDayView.startHour + 1;
+    final totalHeight = hourCount * CalendarDayView.hourRowHeight;
+    final zajeciaSorted = List<Map<String, dynamic>>.from(widget.zajecia)..sort(
+      (a, b) => DateTime.parse(a['od']).compareTo(DateTime.parse(b['od'])),
+    );
 
     return SingleChildScrollView(
+      controller: widget.scrollController,
       physics: const ClampingScrollPhysics(),
       child: SizedBox(
         height: totalHeight,
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // --- Warstwa godzinowa (tło, poziome linie, godziny) ---
+            // Warstwa godzinowa
             ListView.builder(
               physics: const NeverScrollableScrollPhysics(),
               itemCount: hourCount,
               itemBuilder: (context, index) {
-                final hour = startHour + index;
+                final hour = CalendarDayView.startHour + index;
                 return SizedBox(
-                  height: hourRowHeight,
+                  height: CalendarDayView.hourRowHeight,
                   child: Stack(
                     children: [
-                      // Pozioma linia na środku godziny
                       Positioned(
-                        left: hourLabelWidth + verticalLineOffset,
+                        left:
+                            CalendarDayView.hourLabelWidth +
+                            CalendarDayView.verticalLineOffset,
                         right: 0,
-                        top: hourRowHeight / 2,
+                        top: CalendarDayView.hourRowHeight / 2,
                         child: Container(
-                          height: horizontalLineHeight,
-                          color: kNavBorder,
+                          height: CalendarDayView.horizontalLineHeight,
+                          color: const Color(
+                            0xFFEDE6F3,
+                          ), // Figma: calendar line (linia godziny)
                         ),
                       ),
-                      // Godzina po lewej
+
                       Positioned(
                         left: 0,
                         top: 0,
-                        width: hourLabelWidth,
-                        height: hourRowHeight,
+                        width: CalendarDayView.hourLabelWidth,
+                        height: CalendarDayView.hourRowHeight,
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
@@ -78,36 +137,49 @@ class CalendarDayView extends StatelessWidget {
             ),
             // Pionowa linia
             Positioned(
-              left: hourLabelWidth + 16,
+              left: CalendarDayView.hourLabelWidth + 16,
               top: 0,
               bottom: 0,
-              child: Container(width: verticalLineWidth, color: kNavBorder),
+              child: Container(
+                width: CalendarDayView.verticalLineWidth,
+                color: kCalendarLine,
+              ),
             ),
-            // Karty zajęć precyzyjnie przyczepione do godzin/minut
+            // Karty zajęć
             ...zajeciaSorted.map((zajecie) {
               final start = DateTime.parse(zajecie['od']);
               final end = DateTime.parse(zajecie['do_']);
-              final hourOffset = (start.hour - startHour) * hourRowHeight +
-                  (start.minute / 60.0) * hourRowHeight;
+              final hourOffset =
+                  (start.hour - CalendarDayView.startHour) *
+                      CalendarDayView.hourRowHeight +
+                  (start.minute / 60.0) * CalendarDayView.hourRowHeight;
               final durationMinutes = end.difference(start).inMinutes;
-              final cardHeight = (durationMinutes / 60.0) * hourRowHeight;
+              final cardHeight =
+                  (durationMinutes / 60.0) * CalendarDayView.hourRowHeight;
 
-              // Fallback na kolory jeśli nie przekazane w zajecie
-              final backgroundColor = zajecie['backgroundColor'] ?? kCardPurple;
-              final dotColor = zajecie['dotColor'] ?? kAvatarZajecia;
+              final rz = zajecie['rz']?.toString().toUpperCase() ?? '';
+              final mainColor = userProfile.getColorForSubjectType(rz);
 
               return Positioned(
-                left: hourLabelWidth + 24,
+                left: CalendarDayView.hourLabelWidth + 24,
                 top: hourOffset,
                 width: 264,
                 height: cardHeight,
                 child: ZajeciaCalendarCard(
                   title: zajecie['przedmiot'] ?? '',
-                  time: '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')} - '
+                  time:
+                      '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')} - '
                       '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}',
                   room: zajecie['miejsce'] ?? '',
-                  backgroundColor: backgroundColor,
-                  dotColor: dotColor,
+                  backgroundColor: mainColor,
+                  dotColor: mainColor,
+                  onTap:
+                      () => showZajeciaDetailsModal(
+                        context,
+                        zajecie,
+                        backgroundColor: mainColor,
+                        dotColor: mainColor,
+                      ),
                 ),
               );
             }),

@@ -123,6 +123,26 @@ class CalendarTable extends StatelessWidget {
                       ),
             );
           },
+          selectedBuilder: (context, day, focusedDay) {
+            return Center(
+              child: Container(
+                width: 28,
+                height: 28,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF6750A4), // Figma: selected day circle
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    '${day.day}',
+                    style: AppTextStyles.calendarDayNumber(
+                      context,
+                    ).copyWith(color: Colors.white),
+                  ),
+                ),
+              ),
+            );
+          },
           todayBuilder: (context, day, focusedDay) {
             final isSelected =
                 day.year == selectedDay.year &&
@@ -151,30 +171,13 @@ class CalendarTable extends StatelessWidget {
                         '${day.day}',
                         style: AppTextStyles.calendarDayNumber(
                           context,
-                        ).copyWith(color: const Color(0xFF6750A4)),
+                        ).copyWith(
+                          color: const Color(0xFF6750A4),
+                        ), // Figma: today text
                       ),
             );
           },
-          selectedBuilder: (context, day, focusedDay) {
-            return Center(
-              child: Container(
-                width: 28,
-                height: 28,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF6750A4),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Text(
-                    '${day.day}',
-                    style: AppTextStyles.calendarDayNumber(
-                      context,
-                    ).copyWith(color: Colors.white),
-                  ),
-                ),
-              ),
-            );
-          },
+
           outsideBuilder: (context, day, focusedDay) {
             return Center(
               child: Text(

@@ -7,28 +7,20 @@ import 'screens/calendar.dart';
 import 'screens/index.dart';
 import 'screens/profile.dart';
 import 'theme/fonts.dart';
-import 'theme/theme.dart'; // <--- dodany import
+import 'theme/theme.dart';
 import 'my_uz_icons.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'services/user_profile_loader.dart';
 import 'package:device_preview/device_preview.dart';
 
 Future main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-      systemNavigationBarColor: Colors.white,
-      systemNavigationBarIconBrightness: Brightness.dark,
-      systemNavigationBarDividerColor: Colors.transparent,
-    ),
-  );
   await dotenv.load();
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_KEY']!,
   );
-  //runApp(DevicePreview(builder: (context) => const MyApp()));
+  await loadUserProfileFromDb();
   runApp(const MyApp());
 }
 
@@ -37,9 +29,21 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Ustawienie stylu systemowego na stały biały kolor z ciemnymi ikonami
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.white,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.white,
+        systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarDividerColor: Colors.transparent,
+      ),
+    );
+
     return MaterialApp(
       title: 'MyUZ',
-      theme: buildAppTheme(), // <--- użycie nowego Theme
+      theme: buildAppTheme(),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -47,7 +51,9 @@ class MyApp extends StatelessWidget {
       ],
       supportedLocales: const [Locale('pl', 'PL')],
       home: const MainScreen(),
-      builder: DevicePreview.appBuilder,
+      builder: (context, child) {
+        return DevicePreview.appBuilder(context, child);
+      },
     );
   }
 }
@@ -63,33 +69,11 @@ class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
   final ScrollController _scrollController = ScrollController();
 
-  // Stan motywu i dark mode
-  int _selectedTheme = 0;
-  bool _isDarkMode = false;
-
   List<Widget> get _screens => [
     const HomeScreen(),
     const CalendarScreen(),
     IndexScreen(),
-    ProfileScreen(
-      selectedTheme: _selectedTheme,
-      isDarkMode: _isDarkMode,
-      onThemeSelected: (int idx) {
-        setState(() {
-          _selectedTheme = idx;
-        });
-      },
-      onDarkModeChanged: (bool value) {
-        setState(() {
-          _isDarkMode = value;
-        });
-      },
-      onStudentDataTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Dane studenta')),
-        );
-      },
-    ),
+    const ProfileScreen(),
   ];
 
   void _onItemTapped(int index) {
@@ -106,7 +90,6 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // --- Kolory nawigacji z theme ---
     final selectedColor = kNavSelected;
     final unselectedColor = kNavUnselected;
     final borderColor = kNavBorder;
@@ -117,7 +100,7 @@ class _MainScreenState extends State<MainScreen> {
       {'icon': MyUzIcons.user, 'label': 'Konto'},
     ];
     return Scaffold(
-      body: NotificationListener<ScrollNotification>(
+      body: NotificationListener(
         onNotification: (scrollNotification) {
           return false;
         },
@@ -176,10 +159,11 @@ class _MainScreenState extends State<MainScreen> {
         screen is IndexScreen ||
         screen is ProfileScreen) {
       return Builder(
-        builder: (context) => PrimaryScrollController(
-          controller: _scrollController,
-          child: screen,
-        ),
+        builder:
+            (context) => PrimaryScrollController(
+              controller: _scrollController,
+              child: screen,
+            ),
       );
     }
     return screen;

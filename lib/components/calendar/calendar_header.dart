@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/fonts.dart';
+import '../../my_uz_icons.dart';
 
 class CalendarHeader extends StatelessWidget {
   final String monthName;
@@ -23,12 +24,13 @@ class CalendarHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
+      color: Colors.white, // tło headera (Figma: header background)
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _circleButton(icon: Icons.menu, onTap: onMenu),
+          _circleButton(icon: MyUzIcons.menu, onTap: onMenu),
           const SizedBox(width: 16),
           GestureDetector(
             onTap: onToggleFormat,
@@ -37,14 +39,13 @@ class CalendarHeader extends StatelessWidget {
               children: [
                 Text(
                   monthName,
-                  style: AppTextStyles.calendarMonthName(context),
+                  style: AppTextStyles.calendarMonthName(context).copyWith(
+                    color: const Color(0xFF1D192B),
+                  ), // Figma: text/primary
                 ),
                 const SizedBox(width: 4),
                 TweenAnimationBuilder(
-                  tween: Tween(
-                    begin: 0.0,
-                    end: isMonthFormat ? 0.5 : 0.0,
-                  ),
+                  tween: Tween(begin: 0.0, end: isMonthFormat ? 0.5 : 0.0),
                   duration: const Duration(milliseconds: 200),
                   builder: (context, value, child) {
                     return Transform.rotate(
@@ -54,7 +55,7 @@ class CalendarHeader extends StatelessWidget {
                   },
                   child: Icon(
                     Icons.keyboard_arrow_down_rounded,
-                    color: const Color(0xFF6750A4),
+                    color: const Color(0xFF1D192B), // Figma: icon/primary
                     size: 24,
                   ),
                 ),
@@ -62,9 +63,9 @@ class CalendarHeader extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          _circleButton(icon: Icons.search, onTap: onSearch),
+          _circleButton(icon: MyUzIcons.search, onTap: onSearch),
           const SizedBox(width: 6),
-          _circleButton(icon: Icons.add, onTap: onAdd),
+          _circleButton(icon: MyUzIcons.plus, onTap: onAdd),
         ],
       ),
     );
@@ -75,11 +76,12 @@ class CalendarHeader extends StatelessWidget {
       width: 48,
       height: 48,
       decoration: ShapeDecoration(
-        color: const Color(0xFFE8DEF8),
+        color: const Color(0xFFF7F2F9), // Figma: kółko przycisku
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
       ),
       child: IconButton(
-        icon: Icon(icon, color: const Color(0xFF6750A4), size: 24),
+        icon: Icon(icon, color: const Color(0xFF1D192B), size: 24),
+        // Figma: ikona
         onPressed: onTap,
         splashRadius: 24,
         padding: const EdgeInsets.all(8),

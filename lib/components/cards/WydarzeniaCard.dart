@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../theme/fonts.dart';
-import '../../theme/theme.dart';
 
 class WydarzeniaCard extends StatelessWidget {
   final String title;
@@ -8,11 +7,11 @@ class WydarzeniaCard extends StatelessWidget {
   final Color backgroundColor;
 
   const WydarzeniaCard({
-    Key? key,
+    super.key,
     required this.title,
     required this.description,
     required this.backgroundColor,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

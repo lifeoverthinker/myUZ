@@ -9,12 +9,12 @@ class ZadaniaCard extends StatelessWidget {
   final Color backgroundColor;
 
   const ZadaniaCard({
-    Key? key,
+    super.key,
     required this.title,
     required this.description,
     required this.avatarText,
     required this.backgroundColor,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
