@@ -1,8 +1,6 @@
 name: Flutter iOS Build
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -17,50 +15,32 @@ jobs:
         with:
           flutter-version: '3.10.0'
           channel: 'stable'
-
-      - name: Install Apple Certificate and Provisioning Profile
-        env:
-          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
-          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          # Tworzenie zmiennych
-          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
-          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          
-          # Import certyfikatu i profilu provisioningu
-          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
-          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o $PP_PATH
-          
-          # Tworzenie tymczasowego keychain
-          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          
-          # Import certyfikatu do keychain
-          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
-          
-          # Zastosowanie profilu provisioningu
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+          architecture: x64
 
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Update CocoaPods repo
+        run: pod repo update
+        working-directory: ios
+
       - name: Build iOS
         run: flutter build ios --release --no-codesign
 
-      - name: Build IPA
-        run: |
-          cd ios
-          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release -archivePath Runner.xcarchive archive
-          xcodebuild -exportArchive -archivePath Runner.xcarchive -exportOptionsPlist ExportOptions.plist -exportPath ./build
+      - name: Create Payload directory
+        run: mkdir Payload
+        working-directory: build/ios/iphoneos
 
-      - name: Upload IPA
+      - name: Move Runner.app to Payload
+        run: mv Runner.app/ Payload
+        working-directory: build/ios/iphoneos
+
+      - name: Zip output to IPA
+        run: zip -qq -r -9 FlutterIpaExport.ipa Payload
+        working-directory: build/ios/iphoneos
+
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v3
         with:
           name: release-ipa
-          path: ios/build/Runner.ipa
+          path: build/ios/iphoneos/FlutterIpaExport.ipa
