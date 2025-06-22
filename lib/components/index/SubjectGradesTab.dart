@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../theme/fonts.dart';
 import '../../theme/theme.dart';
-import '../../screens/grade_details_screen.dart';
+import 'grade_details_screen.dart';
 import '../../my_uz_icons.dart';
 
 String mapSectionTypeToFullName(String typeCode) {

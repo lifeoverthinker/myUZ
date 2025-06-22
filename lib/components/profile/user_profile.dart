@@ -45,10 +45,17 @@ class UserProfile {
 
   String get fullName => '$imie $nazwisko';
 
+  void setFullName(String name) {
+    final parts = name.split(' ');
+    imie = parts.first;
+    nazwisko = parts.length > 1 ? parts.sublist(1).join(' ') : '';
+    _updateInitials();
+  }
+
   GroupProfile? get activeGroup {
     if (grupy.value.isEmpty) return null;
     return grupy.value.firstWhere(
-          (g) => g.kodGrupy == kodGrupy.value && g.podgrupa == podgrupa.value,
+      (g) => g.kodGrupy == kodGrupy.value && g.podgrupa == podgrupa.value,
       orElse: () => grupy.value.first,
     );
   }
@@ -128,14 +135,7 @@ class UserProfile {
   }
 
   Future updateName(String fullName) async {
-    final parts = fullName.split(' ');
-    final newImie = parts.first;
-    final newNazwisko = parts.length > 1 ? parts.sublist(1).join(' ') : '';
-
-    imie = newImie;
-    nazwisko = newNazwisko;
-    _updateInitials();
-
+    setFullName(fullName);
     if (id.isNotEmpty) {
       await Supabase.instance.client.from('profiles').upsert({
         'id': id,
@@ -149,7 +149,7 @@ class UserProfile {
   GroupProfile? getGroupInfo(String kod, String? pod) {
     try {
       return grupy.value.firstWhere(
-            (g) => g.kodGrupy == kod && g.podgrupa == (pod ?? ''),
+        (g) => g.kodGrupy == kod && g.podgrupa == (pod ?? ''),
       );
     } catch (_) {
       return null;

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../theme/fonts.dart';
-import '../theme/theme.dart';
-import '../my_uz_icons.dart';
+import '../../theme/fonts.dart';
+import '../../theme/theme.dart';
+import '../../my_uz_icons.dart';
 
 class GradeDetailsScreen extends StatefulWidget {
   final String subjectName;

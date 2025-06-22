@@ -14,11 +14,9 @@ class ProfileSummaryCard extends StatelessWidget {
     return ValueListenableBuilder<String>(
       valueListenable: userProfile.kodGrupy,
       builder: (context, kodGrupy, _) {
-        print('DEBUG: ProfileSummaryCard ValueListenableBuilder kodGrupy=$kodGrupy');
         return ValueListenableBuilder<String>(
           valueListenable: userProfile.podgrupa,
           builder: (context, podgrupa, _) {
-            print('DEBUG: ProfileSummaryCard ValueListenableBuilder podgrupa=$podgrupa');
             if (kodGrupy.isEmpty) {
               return _summaryBox(context, "-", "-", "-", "-", "-");
             }
@@ -46,6 +44,7 @@ class ProfileSummaryCard extends StatelessWidget {
                   data['group'] ?? "-",
                   data['podgrupa'] ?? "-",
                   data['tryb'] ?? "-",
+                  // data['rok'] ?? "-", // Rok studiów - zakomentowane/usunięte
                 );
               },
             );
@@ -62,6 +61,7 @@ class ProfileSummaryCard extends StatelessWidget {
     String grupa,
     String pod,
     String tryb,
+    // String rok, // Rok studiów - zakomentowane/usunięte
   ) {
     return Center(
       child: ConstrainedBox(
@@ -88,6 +88,7 @@ class ProfileSummaryCard extends StatelessWidget {
               _row(context, "Grupa", grupa),
               _row(context, "Podgrupa", pod),
               _row(context, "Tryb studiów", tryb),
+              // _row(context, "Rok studiów", rok), // zakomentowane
             ],
           ),
         ),
@@ -102,15 +103,17 @@ class ProfileSummaryCard extends StatelessWidget {
         children: [
           Text(
             "$label:",
-            style: AppTextStyles.cardDescription(context)
-                .copyWith(fontWeight: FontWeight.bold, color: Colors.black87),
+            style: AppTextStyles.cardDescription(
+              context,
+            ).copyWith(fontWeight: FontWeight.bold, color: Colors.black87),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               value.isNotEmpty ? value : "-",
-              style: AppTextStyles.cardDescription(context)
-                  .copyWith(color: Colors.black54),
+              style: AppTextStyles.cardDescription(
+                context,
+              ).copyWith(color: Colors.black54),
               overflow: TextOverflow.ellipsis,
               maxLines: 1,
             ),

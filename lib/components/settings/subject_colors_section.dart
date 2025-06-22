@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../theme/theme.dart';
 import '../../theme/fonts.dart';
 import '../profile/user_profile.dart';
+import '../../my_uz_icons.dart';
 
 class SubjectColorsSection extends StatefulWidget {
   const SubjectColorsSection({super.key});
@@ -11,100 +12,137 @@ class SubjectColorsSection extends StatefulWidget {
 }
 
 class _SubjectColorsSectionState extends State<SubjectColorsSection> {
+  final List<Color> palette = [
+    Color(0xFFFFF8E1),
+    Color(0xFFE8DEF8),
+    Color(0xFFDAF4D6),
+    Color(0xFFFFD8E4),
+    Color(0xFFE6F3EC),
+  ];
+  final List<Color> borders = [
+    Color(0xFFFFE082),
+    Color(0xFFB39DDB),
+    Color(0xFF81C784),
+    Color(0xFFF8BBD0),
+    Color(0xFF80CBC4),
+  ];
+
+  final Map<String, String> subjectTypes = const {
+    'W': 'Wykład',
+    'C': 'Ćwiczenia',
+    'L': 'Laboratoria',
+    'P': 'Projekt',
+    'S': 'Seminarium',
+  };
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            CircleAvatar(
-              radius: 20,
-              backgroundColor: kCardPurple,
-              child: const Icon(Icons.color_lens, color: kMainText, size: 20),
+    const Color iconColor = Color(0xFF1D192B);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FA),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        toolbarHeight: 64,
+        titleSpacing: 0,
+        leading: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: IconButton(
+            icon: const Icon(
+              MyUzIcons.chevron_left,
+              color: iconColor,
+              size: 24,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Kolory typów zajęć',
-                    style: AppTextStyles.cardDescription(
-                      context,
-                    ).copyWith(color: kMainText.withOpacity(0.7), fontSize: 12),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Dostosuj kolory dla typów zajęć',
-                    style: AppTextStyles.cardTitle(
-                      context,
-                    ).copyWith(fontSize: 16),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            onPressed: () => Navigator.pop(context),
+            tooltip: 'Wróć',
+          ),
         ),
-        const SizedBox(height: 20),
-        ...{
-          'W': 'Wykład',
-          'C': 'Ćwiczenia',
-          'L': 'Laboratoria',
-          'P': 'Projekt',
-          'S': 'Seminarium',
-        }.entries.map((entry) => _buildSubjectColorRow(entry.key, entry.value)),
-      ],
+        title: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            'Kolory typów zajęć',
+            style: AppTextStyles.sectionHeader(context).copyWith(fontSize: 20),
+          ),
+        ),
+        centerTitle: false,
+        actions: [const SizedBox(width: 16)],
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children:
+                subjectTypes.entries
+                    .map(
+                      (entry) => _buildSubjectColorCard(entry.key, entry.value),
+                    )
+                    .toList(),
+          ),
+        ),
+      ),
     );
   }
 
-  Widget _buildSubjectColorRow(String typeCode, String typeName) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
+  Widget _buildSubjectColorCard(String typeCode, String typeName) {
+    final selectedIdx = userProfile.subjectColorMapping[typeCode] ?? 0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 100,
-            child: Text(
-              typeName,
-              style: AppTextStyles.cardDescription(
-                context,
-              ).copyWith(fontWeight: FontWeight.w500, fontSize: 14),
-            ),
+          Row(
+            children: [
+              Container(
+                width: 16,
+                height: 16,
+                margin: const EdgeInsets.only(right: 10),
+                decoration: BoxDecoration(
+                  color: palette[selectedIdx],
+                  shape: BoxShape.circle,
+                  border: Border.all(color: borders[selectedIdx], width: 2),
+                ),
+              ),
+              Text(
+                typeName,
+                style: AppTextStyles.cardTitle(
+                  context,
+                ).copyWith(fontWeight: FontWeight.w600, fontSize: 15),
+              ),
+            ],
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: List.generate(
-                  kMaterialPalette.length,
-                  (index) => GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        userProfile.setColorForSubjectType(typeCode, index);
-                      });
-                    },
-                    child: Container(
-                      width: 32,
-                      height: 32,
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: BoxDecoration(
-                        color: kMaterialPalette[index],
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color:
-                              userProfile.subjectColorMapping[typeCode] == index
-                                  ? kMainText
-                                  : Colors.transparent,
-                          width: 2,
-                        ),
-                      ),
+          const SizedBox(height: 14),
+          Row(
+            children: List.generate(palette.length, (idx) {
+              final isSelected = selectedIdx == idx;
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    userProfile.setColorForSubjectType(typeCode, idx);
+                  });
+                },
+                child: Container(
+                  margin: EdgeInsets.only(
+                    right: idx < palette.length - 1 ? 16 : 0,
+                  ),
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: palette[idx],
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isSelected ? borders[idx] : Colors.transparent,
+                      width: isSelected ? 3 : 2,
                     ),
                   ),
                 ),
-              ),
-            ),
+              );
+            }),
           ),
         ],
       ),

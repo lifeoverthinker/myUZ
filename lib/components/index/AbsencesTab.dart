@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../screens/absence_details_screen.dart';
+import 'absence_details_screen.dart';
 import '../../theme/fonts.dart';
 import '../../theme/theme.dart';
 import '../../my_uz_icons.dart';

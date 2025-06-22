@@ -498,30 +498,26 @@ class _IndexScreenState extends State<IndexScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Nagłówek
+            // Nagłówek jak w Settings/Profile
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Text(
                 'Indeks',
-                style: AppTextStyles.indexTitle(context).copyWith(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  color: kMainText,
-                ),
+                style: AppTextStyles.profileSectionTitle(
+                  context,
+                ).copyWith(fontSize: 24, fontWeight: FontWeight.w600),
               ),
             ),
-            // TabBar
+            // TabBar z paddingiem jak w profilu
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
               child: TabBarRow(
                 selectedIndex: _tabIndex,
                 labels: const ['Oceny', 'Nieobecności'],
                 onTabChanged: (idx) => setState(() => _tabIndex = idx),
               ),
             ),
-            // Zawartość
-            // Zawartość - fragment w build method
-            // Zawartość - fragment w build method
+            // Zawartość bez zmian
             Expanded(
               child:
                   groupIsSelected
@@ -545,7 +541,6 @@ class _IndexScreenState extends State<IndexScreen>
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            // Ikona bez kwadratowego tła
                             Icon(
                               MyUzIcons.graduation_hat,
                               color: kIndexPrimary,

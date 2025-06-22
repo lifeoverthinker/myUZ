@@ -23,7 +23,7 @@ const Color kCardYellow = Color(0xFFFFF8E1); // Card (yellow) - Index pastel
 const Color kCardBlue = Color(0xFFE6F3EC); // Card (blue/green) - Index pastel
 const Color kCardRed = Color(0xFFE46962); // (Figma: materialPalette[red])
 const Color kCardGold = Color(0xFFFFD600); // (Figma: materialPalette[yellow/gold])
-const Color kCalendarLine = Color(0xFFEDE6F3); // pastelowy szary, dopasuj do projektu
+const Color kCalendarLine = Color(0xFFEDE6F3); // pastelowy fiolet
 
 // --- Kolory ikon i avatarów ---
 const Color kAvatarZajecia = Color(0xFF6750A4); // Avatar ZajęciaCard (Figma: avatar zajecia)
@@ -35,6 +35,8 @@ const Color kSelectedDayCircle = Color(0xFF6750A4); // Figma: selected day
 // --- Kolory tła sekcji, screenów ---
 const Color kBackground = kWhite; // Tło Home, sekcja listy (Figma: background)
 const Color kWhite = Colors.white;
+const Color kPanelBackground = Color(0xFFF8F9FA); // Kolor tła dla settings/profile (jasny szary)
+
 
 // --- Kolory własne do settings_screen ---
 const Color kCardBackground = kWhite; // lub inny kolor jeśli chcesz
@@ -44,6 +46,7 @@ const Color kSecondaryText = kGreyText; // lub inny szary z Twojej palety
 // --- Kolory akcentów, error, powiadomienia ---
 const Color kError = Color(0xFFB3261E); // Kropka powiadomień (Figma: error)
 const Color kCardBorder = Color(0xFF79747E); // Border nieaktywny np. TabBarRow
+const Color kActionAccent = kAvatarZajecia; // fiolet przycisku „Dodaj”[1]
 
 // --- Kolory utility (np. szare teksty, border, inne) ---
 const Color kGreyText = Color(0xFF49454F); // Tekst nieaktywny np. TabBarRow, godziny

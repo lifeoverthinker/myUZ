@@ -7,19 +7,19 @@ class AppearanceSection extends StatefulWidget {
   const AppearanceSection({super.key});
 
   @override
-  State<AppearanceSection> createState() => _AppearanceSectionState();
+  State createState() => _AppearanceSectionState();
 }
 
 class _AppearanceSectionState extends State<AppearanceSection> {
   bool _isDarkMode = false;
   int _selectedTheme = 0;
+
   final List<Color> themeColors = [
     kCardPurple,
     kCardGreen,
     kCardYellow,
     kCardPink,
     kCardBlue,
-    kBackground,
   ];
 
   @override
@@ -57,16 +57,13 @@ class _AppearanceSectionState extends State<AppearanceSection> {
                 children: [
                   Text(
                     'Motyw kolorystyczny',
-                    style: AppTextStyles.cardDescription(
-                      context,
-                    ).copyWith(color: kMainText.withOpacity(0.7), fontSize: 12),
+                    style: AppTextStyles.cardDescription(context).copyWith(
+                        color: kMainText.withOpacity(0.7), fontSize: 12),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     'Wybierz kolor główny aplikacji',
-                    style: AppTextStyles.cardTitle(
-                      context,
-                    ).copyWith(fontSize: 16),
+                    style: AppTextStyles.cardTitle(context).copyWith(fontSize: 16),
                   ),
                 ],
               ),
@@ -79,19 +76,17 @@ class _AppearanceSectionState extends State<AppearanceSection> {
           runSpacing: 12,
           children: List.generate(
             themeColors.length,
-            (index) => GestureDetector(
-              onTap:
-                  () => setState(() {
-                    _selectedTheme = index;
-                    userProfile.selectedThemeColor = index;
-                  }),
+                (index) => GestureDetector(
+              onTap: () => setState(() {
+                _selectedTheme = index;
+                userProfile.selectedThemeColor = index;
+              }),
               child: CircleAvatar(
                 radius: 24,
                 backgroundColor: themeColors[index],
-                child:
-                    _selectedTheme == index
-                        ? Icon(Icons.check, color: kMainText)
-                        : null,
+                child: _selectedTheme == index
+                    ? Icon(Icons.check, color: kMainText)
+                    : null,
               ),
             ),
           ),
@@ -115,9 +110,8 @@ class _AppearanceSectionState extends State<AppearanceSection> {
             children: [
               Text(
                 'Tryb ciemny',
-                style: AppTextStyles.cardDescription(
-                  context,
-                ).copyWith(color: kMainText.withOpacity(0.7), fontSize: 12),
+                style: AppTextStyles.cardDescription(context).copyWith(
+                    color: kMainText.withOpacity(0.7), fontSize: 12),
               ),
               const SizedBox(height: 2),
               Text(
